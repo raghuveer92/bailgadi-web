@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#162b20" />
+    <meta name="description" content="Guide a bullock cart through a peaceful low-poly Indian village." />
+    <title>Bailgadi — Village Roads</title>
+  </head>
+  <body>
+    <main id="game">
+      <div id="canvas-root" aria-label="3D bullock cart game"></div>
+
+      <section id="start-screen" class="overlay">
+        <div class="start-card">
+          <p class="eyebrow">A village road adventure</p>
+          <h1>BAILGADI</h1>
+          <p class="subtitle">Take the old road home.</p>
+          <div class="motif" aria-hidden="true"><span></span><i>✦</i><span></span></div>
+          <p class="instructions">
+            Steer gently. Build momentum.<br />
+            Enjoy the road.
+          </p>
+          <button id="play-button" type="button">PLAY <span>→</span></button>
+          <p class="keys">WASD / ARROW KEYS</p>
+        </div>
+      </section>
+
+      <div id="hud" class="hidden" aria-live="polite">
+        <div class="brand">
+          <span class="brand-mark">ब</span>
+          <span><strong>BAILGADI</strong><small>VILLAGE ROAD</small></span>
+        </div>
+        <div class="stats">
+          <div><small>DISTANCE</small><strong id="distance">0 m</strong></div>
+          <div><small>SPEED</small><strong id="speed">0.0 km/h</strong></div>
+        </div>
+      </div>
+
+      <div id="hint" class="hidden">W / ↑ to move · A D to steer · S to brake</div>
+
+      <div id="touch-controls" class="hidden" aria-label="Touch controls">
+        <div class="touch-steer">
+          <button type="button" data-control="left" aria-label="Steer left">←</button>
+          <button type="button" data-control="right" aria-label="Steer right">→</button>
+        </div>
+        <div class="touch-drive">
+          <button type="button" data-control="brake" aria-label="Brake or reverse"><span>▼</span><small>BRAKE</small></button>
+          <button class="forward" type="button" data-control="forward" aria-label="Move forward"><span>▲</span><small>FORWARD</small></button>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

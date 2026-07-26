@@ -72,6 +72,8 @@ function obstacleHit(nextX, nextZ) {
 
 function updateMovement(delta) {
   const input = controls.state;
+  const oldX = cart.position.x;
+  const oldZ = cart.position.z;
 
   if (input.forward) {
     state.speed += tuning.acceleration * delta;
@@ -108,9 +110,12 @@ function updateMovement(delta) {
 
   cart.rotation.y = state.heading;
   cart.rotation.z = damp(cart.rotation.z, -steerInput * speedRatio * 0.035, 5, delta);
-  cart.position.y = 0.05 + Math.sin(state.elapsed * 7.5) * speedRatio * 0.018;
+  cart.position.y = 0.05;
 
-  animateCart(animationParts, state.speed, state.elapsed, delta);
+  const travelledDistance =
+    (cart.position.x - oldX) * headingVector.x
+    + (cart.position.z - oldZ) * headingVector.z;
+  animateCart(animationParts, state.speed, travelledDistance, state.elapsed, delta);
 }
 
 function updateCamera(delta) {
@@ -153,6 +158,11 @@ function updateHud() {
       cart: cart.position.toArray().map((value) => Number(value.toFixed(3))),
       camera: camera.position.toArray().map((value) => Number(value.toFixed(3))),
       heading: Number(state.heading.toFixed(3)),
+      wheelRotation: Number(animationParts.wheels[0].rotation.x.toFixed(3)),
+      bullLegs: animationParts.bulls.map((bull) =>
+        bull.legs.map((leg) => Number(leg.root.rotation.x.toFixed(3)))
+      ),
+      suspensionY: Number(animationParts.sprungGroup.position.y.toFixed(3)),
     });
   }
 }
@@ -204,14 +214,25 @@ window.__bailgadi = {
 
 animate();
 
-if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("autotest")) {
+const autoTest = import.meta.env.DEV
+  ? new URLSearchParams(window.location.search).get("autotest")
+  : null;
+if (autoTest) {
   startGame();
-  window.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowUp", bubbles: true }));
+  const driveKey = autoTest === "reverse" ? "ArrowDown" : "ArrowUp";
+  window.dispatchEvent(new KeyboardEvent("keydown", { code: driveKey, bubbles: true }));
+  if (autoTest === "reverse") {
+    setTimeout(() => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { code: driveKey, bubbles: true }));
+    }, 1600);
+  }
   setTimeout(() => {
-    window.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowLeft", bubbles: true }));
+    if (autoTest !== "reverse") {
+      window.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowLeft", bubbles: true }));
+    }
   }, 550);
   setTimeout(() => {
     window.dispatchEvent(new KeyboardEvent("keyup", { code: "ArrowLeft", bubbles: true }));
-    window.dispatchEvent(new KeyboardEvent("keyup", { code: "ArrowUp", bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent("keyup", { code: driveKey, bubbles: true }));
   }, 1600);
 }

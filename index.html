@@ -18,8 +18,8 @@
           <p class="subtitle">Take the old road home.</p>
           <div class="motif" aria-hidden="true"><span></span><i>✦</i><span></span></div>
           <p class="instructions">
-            Steer gently. Build momentum.<br />
-            Enjoy the road.
+            Tap forward to set the pace.<br />
+            Steer gently. Enjoy the road.
           </p>
           <button id="play-button" type="button">PLAY <span>→</span></button>
           <p class="keys">WASD / ARROW KEYS</p>
@@ -34,7 +34,7 @@
         <div class="stats">
           <div><small>DISTANCE</small><strong id="distance">0 m</strong></div>
           <div><small>VILLAGE</small><strong id="remaining-distance">500 m</strong></div>
-          <div><small>SPEED</small><strong id="speed">0.0 km/h</strong></div>
+          <div><small>SPEED · <span id="speed-mode">STOPPED</span></small><strong id="speed">0.0 km/h</strong></div>
         </div>
         <p id="objective">Reach the village - 500m</p>
         <div id="voice-control" class="voice-control">
@@ -49,7 +49,7 @@
       </div>
 
       <div id="checkpoint-message" class="checkpoint-message hidden" role="status"></div>
-      <div id="hint" class="hidden">W / ↑ to move · A D to steer · S to brake</div>
+      <div id="hint" class="hidden">Tap W / ↑ for more speed · Tap S / ↓ to slow · A D to steer</div>
 
       <div id="touch-controls" class="hidden" aria-label="Touch controls">
         <div class="touch-steer">
@@ -57,7 +57,7 @@
           <button type="button" data-control="right" aria-label="Steer right">→</button>
         </div>
         <div class="touch-drive">
-          <button type="button" data-control="brake" aria-label="Brake or reverse"><span>▼</span><small>BRAKE</small></button>
+          <button type="button" data-control="brake" aria-label="Reduce speed"><span>▼</span><small>BRAKE</small></button>
           <button class="forward" type="button" data-control="forward" aria-label="Move forward"><span>▲</span><small>FORWARD</small></button>
         </div>
       </div>

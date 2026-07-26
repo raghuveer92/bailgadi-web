@@ -251,15 +251,19 @@ function createDriver() {
   const rightShoulder = new THREE.Vector3(0.43, 1.13, 0.05);
   const leftHand = new THREE.Vector3(-0.42, 0.84, 0.95);
   const rightHand = new THREE.Vector3(0.42, 0.84, 0.95);
-  driver.add(
-    rodBetween(leftShoulder, leftHand, 0.12, KURTA, 6),
-    rodBetween(rightShoulder, rightHand, 0.12, KURTA, 6),
-  );
-  const leftFist = sphere(0.14, SKIN, 7, 5);
-  leftFist.position.copy(leftHand);
-  const rightFist = leftFist.clone();
-  rightFist.position.copy(rightHand);
-  driver.add(leftFist, rightFist);
+  const createArm = (shoulder, hand) => {
+    const arm = new THREE.Group();
+    arm.position.copy(shoulder);
+    const localHand = hand.clone().sub(shoulder);
+    arm.add(rodBetween(new THREE.Vector3(), localHand, 0.12, KURTA, 6));
+    const fist = sphere(0.14, SKIN, 7, 5);
+    fist.position.copy(localHand);
+    arm.add(fist);
+    driver.add(arm);
+    return arm;
+  };
+  const leftArm = createArm(leftShoulder, leftHand);
+  const rightArm = createArm(rightShoulder, rightHand);
 
   [-1, 1].forEach((side) => {
     const thighStart = new THREE.Vector3(side * 0.28, 0.28, 0.08);
@@ -274,7 +278,7 @@ function createDriver() {
     driver.add(sandal);
   });
 
-  return driver;
+  return { group: driver, arms: [leftArm, rightArm] };
 }
 
 function addCartBody(sprungGroup) {
@@ -335,6 +339,7 @@ export function createBullockCart() {
     suspensionY: 0,
     suspensionRoll: 0,
     driverReaction: 0,
+    driverReinReaction: 0,
     lastStepIndex: 0,
     roadImpactStrength: 0,
     roadImpactSide: 0,
@@ -364,11 +369,13 @@ export function createBullockCart() {
   const sprungGroup = new THREE.Group();
   sprungGroup.name = "CartBody";
   addCartBody(sprungGroup);
-  const driver = createDriver();
+  const driverParts = createDriver();
+  const driver = driverParts.group;
   sprungGroup.add(driver);
   group.add(sprungGroup);
   animationParts.sprungGroup = sprungGroup;
   animationParts.driver = driver;
+  animationParts.driverArms = driverParts.arms;
 
   const harness = new THREE.Group();
   harness.name = "YokeAndPoles";
@@ -529,15 +536,28 @@ export function animateCart(
     0,
     1 - Math.exp(-3.4 * delta),
   );
+  parts.driverReinReaction = THREE.MathUtils.lerp(
+    parts.driverReinReaction,
+    0,
+    1 - Math.exp(-4.2 * delta),
+  );
   parts.driver.rotation.x = -parts.suspensionY * 0.65 + parts.driverReaction;
   parts.driver.rotation.z = -parts.suspensionRoll * 0.75;
   parts.driver.position.y = 1.88 + Math.sin(elapsed * 1.4) * 0.006;
+  parts.driverArms.forEach((arm, index) => {
+    arm.rotation.x = parts.driverReinReaction;
+    arm.rotation.z =
+      (index === 0 ? -1 : 1)
+      * Math.abs(parts.driverReinReaction)
+      * 0.12;
+  });
 
   return { stepContact };
 }
 
 export function reactDriver(parts, command) {
-  parts.driverReaction = command === "forward" ? 0.09 : -0.055;
+  parts.driverReaction = command === "forward" ? 0.065 : -0.045;
+  parts.driverReinReaction = command === "forward" ? -0.055 : 0.085;
 }
 
 export function triggerCartBump(parts, intensity = 1, side = 0) {
@@ -552,6 +572,7 @@ export function resetCartAnimation(parts) {
   parts.suspensionY = 0;
   parts.suspensionRoll = 0;
   parts.driverReaction = 0;
+  parts.driverReinReaction = 0;
   parts.roadImpactStrength = 0;
   parts.roadImpactSide = 0;
   parts.roadImpactTime = 0;
@@ -573,4 +594,5 @@ export function resetCartAnimation(parts) {
   parts.sprungGroup.rotation.z = 0;
   parts.driver.rotation.set(0, 0, 0);
   parts.driver.position.y = 1.88;
+  parts.driverArms.forEach((arm) => arm.rotation.set(0, 0, 0));
 }

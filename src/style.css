@@ -369,6 +369,10 @@ h1 {
   letter-spacing: 0.16em;
 }
 
+.stats small span {
+  color: #fff4d0;
+}
+
 .stats strong {
   margin-top: 5px;
   font: 700 19px/1 "Arial Narrow", Arial, sans-serif;

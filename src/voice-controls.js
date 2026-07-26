@@ -123,7 +123,6 @@ export class VoiceControls {
     this.starting = false;
     clearTimeout(this.restartTimer);
     clearTimeout(this.statusTimer);
-    this.controls.setVoiceCommand("off");
     this.button.disabled = !this.supported;
     this.button.setAttribute("aria-pressed", "false");
     this.button.classList.remove("listening", "command-go", "command-stop");
@@ -167,19 +166,25 @@ export class VoiceControls {
   }
 
   applyCommand(command) {
-    this.controls.setVoiceCommand(command);
-    this.onCommand(command);
+    const changed = command === "forward"
+      ? this.controls.increaseSpeedLevel("voice")
+      : this.controls.decreaseSpeedLevel("voice");
+    this.onCommand(command, changed);
     clearTimeout(this.statusTimer);
     this.button.classList.remove("listening", "command-go", "command-stop");
 
     if (command === "forward") {
       this.button.classList.add("command-go");
       this.label.textContent = "🐂 Chal Chal!";
-      this.message.textContent = "Cart moving forward";
+      this.message.textContent = changed
+        ? `Speed: ${this.controls.getSpeedMode()}`
+        : "Already at maximum speed";
     } else {
       this.button.classList.add("command-stop");
       this.label.textContent = "✋ Ruk Ruk!";
-      this.message.textContent = "Cart braking";
+      this.message.textContent = changed
+        ? `Speed: ${this.controls.getSpeedMode()}`
+        : "Cart is already stopped";
     }
 
     this.statusTimer = setTimeout(() => {

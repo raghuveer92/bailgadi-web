@@ -3,17 +3,18 @@ const GAME_KEYS = new Set([
   "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
 ]);
 
+export const SPEED_MODES = ["STOPPED", "SLOW", "NORMAL", "FAST", "MAX"];
+export const SPEED_TARGETS = [0, 1.55, 2.8, 4.05, 5.2];
+
 export class Controls {
-  constructor(root = document) {
+  constructor({ root = document, onSpeedLevelChange = () => {} } = {}) {
+    this.root = root;
+    this.onSpeedLevelChange = onSpeedLevelChange;
+    this.enabled = false;
+    this.speedLevel = 0;
     this.state = {
-      forward: false,
-      brake: false,
       left: false,
       right: false,
-    };
-    this.voice = {
-      forward: false,
-      brake: false,
     };
 
     this.keyMap = {
@@ -29,24 +30,39 @@ export class Controls {
 
     window.addEventListener("keydown", (event) => this.onKey(event, true), { passive: false });
     window.addEventListener("keyup", (event) => this.onKey(event, false), { passive: false });
-    window.addEventListener("blur", () => this.reset());
+    window.addEventListener("blur", () => this.resetSteering());
 
     root.querySelectorAll("[data-control]").forEach((button) => {
       const control = button.dataset.control;
-      const set = (active, event) => {
-        event.preventDefault();
-        this.state[control] = active;
-        if (active && control === "brake") this.setVoiceCommand("off");
-        button.classList.toggle("active", active);
-        if (active && button.setPointerCapture) button.setPointerCapture(event.pointerId);
-      };
-      button.addEventListener("pointerdown", (event) => set(true, event));
-      button.addEventListener("pointerup", (event) => set(false, event));
-      button.addEventListener("pointercancel", (event) => set(false, event));
-      button.addEventListener("lostpointercapture", () => {
-        this.state[control] = false;
-        button.classList.remove("active");
-      });
+      if (control === "forward" || control === "brake") {
+        button.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          if (!this.enabled) return;
+          if (control === "forward") this.increaseSpeedLevel("touch");
+          else this.decreaseSpeedLevel("touch");
+          button.classList.add("active");
+          if (button.setPointerCapture) button.setPointerCapture(event.pointerId);
+        });
+        const releaseTap = () => button.classList.remove("active");
+        button.addEventListener("pointerup", releaseTap);
+        button.addEventListener("pointercancel", releaseTap);
+        button.addEventListener("lostpointercapture", releaseTap);
+      } else {
+        const setSteering = (active, event) => {
+          event.preventDefault();
+          if (!this.enabled) return;
+          this.state[control] = active;
+          button.classList.toggle("active", active);
+          if (active && button.setPointerCapture) button.setPointerCapture(event.pointerId);
+        };
+        button.addEventListener("pointerdown", (event) => setSteering(true, event));
+        button.addEventListener("pointerup", (event) => setSteering(false, event));
+        button.addEventListener("pointercancel", (event) => setSteering(false, event));
+        button.addEventListener("lostpointercapture", () => {
+          this.state[control] = false;
+          button.classList.remove("active");
+        });
+      }
       button.addEventListener("contextmenu", (event) => event.preventDefault());
     });
   }
@@ -54,36 +70,79 @@ export class Controls {
   onKey(event, active) {
     if (!GAME_KEYS.has(event.code)) return;
     event.preventDefault();
+    if (!this.enabled) return;
     const control = this.keyMap[event.code];
+    if (control === "forward" || control === "brake") {
+      if (!active || event.repeat) return;
+      if (control === "forward") this.increaseSpeedLevel("keyboard");
+      else this.decreaseSpeedLevel("keyboard");
+      return;
+    }
     this.state[control] = active;
-    if (active && control === "brake") this.setVoiceCommand("off");
   }
 
-  reset() {
-    Object.keys(this.state).forEach((key) => { this.state[key] = false; });
-    document.querySelectorAll("[data-control].active").forEach((button) => button.classList.remove("active"));
+  increaseSpeedLevel(source = "input") {
+    if (!this.enabled || this.speedLevel >= SPEED_MODES.length - 1) return false;
+    const previousLevel = this.speedLevel;
+    this.speedLevel += 1;
+    this.onSpeedLevelChange({
+      direction: "forward",
+      source,
+      previousLevel,
+      level: this.speedLevel,
+      mode: SPEED_MODES[this.speedLevel],
+      targetSpeed: SPEED_TARGETS[this.speedLevel],
+    });
+    return true;
+  }
+
+  decreaseSpeedLevel(source = "input") {
+    if (!this.enabled || this.speedLevel <= 0) return false;
+    const previousLevel = this.speedLevel;
+    this.speedLevel -= 1;
+    this.onSpeedLevelChange({
+      direction: "brake",
+      source,
+      previousLevel,
+      level: this.speedLevel,
+      mode: SPEED_MODES[this.speedLevel],
+      targetSpeed: SPEED_TARGETS[this.speedLevel],
+    });
+    return true;
+  }
+
+  setEnabled(enabled) {
+    this.enabled = enabled;
+    if (!enabled) this.resetSteering();
+  }
+
+  resetSteering() {
+    this.state.left = false;
+    this.state.right = false;
+    this.root.querySelectorAll("[data-control].active").forEach((button) => {
+      button.classList.remove("active");
+    });
+  }
+
+  resetAll() {
+    this.resetSteering();
+    this.speedLevel = 0;
+  }
+
+  getTargetSpeed() {
+    return SPEED_TARGETS[this.speedLevel];
+  }
+
+  getSpeedMode() {
+    return SPEED_MODES[this.speedLevel];
   }
 
   getCombinedState() {
-    if (this.state.brake) {
-      return { ...this.state, forward: false, brake: true };
-    }
-    if (this.state.forward) {
-      return { ...this.state, forward: true, brake: false };
-    }
     return {
       ...this.state,
-      forward: this.voice.forward,
-      brake: this.voice.brake,
+      speedLevel: this.speedLevel,
+      speedMode: this.getSpeedMode(),
+      targetSpeed: this.getTargetSpeed(),
     };
-  }
-
-  setVoiceCommand(command) {
-    this.voice.forward = command === "forward";
-    this.voice.brake = command === "brake";
-  }
-
-  releaseVoiceBrake() {
-    this.voice.brake = false;
   }
 }

@@ -4,6 +4,8 @@ const AUDIO_ASSETS = {
   cart: "/assets/audio/wooden-cart-running.mp3",
   breathing: "/assets/audio/bull-breathing.mp3",
   bump: "/assets/audio/cart-bump.mp3",
+  chal: "/assets/audio/chal-chal.mp3",
+  ruk: "/assets/audio/ruk-ruk.mp3",
 };
 
 const VOLUMES = {
@@ -13,6 +15,8 @@ const VOLUMES = {
   cart: 0.28,
   breathing: 0.12,
   bump: 0.3,
+  chal: 0.55,
+  ruk: 0.9,
 };
 
 function safeSessionValue(key) {
@@ -42,7 +46,10 @@ export class AudioManager {
       ["cart", 0],
     ]);
     this.bumpTimer = 4 + Math.random() * 4;
-    this.events = { bumps: 0 };
+    this.events = { bumps: 0, chal: 0, ruk: 0 };
+    this.driverSources = new Map();
+    this.lastDriverPlay = new Map();
+    this.pendingDriverCommand = null;
 
     this.button.addEventListener("click", () => this.setMuted(!this.muted));
     this.updateButton();
@@ -103,8 +110,18 @@ export class AudioManager {
       if (name === "village" || name === "breathing" || name === "hoof" || name === "cart") {
         this.ensureLoop(name);
       }
+      if (
+        (name === "chal" || name === "ruk")
+        && this.pendingDriverCommand?.name === name
+        && performance.now() - this.pendingDriverCommand.requestedAt < 2200
+      ) {
+        const pending = this.pendingDriverCommand;
+        this.pendingDriverCommand = null;
+        this.playDriverCommand(pending.command);
+      }
     } catch {
       this.failed.add(name);
+      if (this.pendingDriverCommand?.name === name) this.pendingDriverCommand = null;
       console.info(`[Audio] FAILED: ${path}`);
     }
   }
@@ -161,7 +178,7 @@ export class AudioManager {
   }
 
   playOneShot(name, volumeScale = 1, playbackRate = 1) {
-    if (!this.context || !this.masterGain || this.muted || !this.buffers.has(name)) return;
+    if (!this.context || !this.masterGain || this.muted || !this.buffers.has(name)) return null;
     const source = this.context.createBufferSource();
     const gain = this.context.createGain();
     source.buffer = this.buffers.get(name);
@@ -170,6 +187,43 @@ export class AudioManager {
     source.connect(gain);
     gain.connect(this.masterGain);
     source.start();
+    return source;
+  }
+
+  playDriverCommand(command) {
+    const name = command === "forward" ? "chal" : "ruk";
+    if (!this.buffers.has(name)) {
+      if (!this.failed.has(name)) {
+        this.pendingDriverCommand = {
+          command,
+          name,
+          requestedAt: performance.now(),
+        };
+      }
+      return;
+    }
+
+    const now = this.context?.currentTime ?? 0;
+    const lastPlayed = this.lastDriverPlay.get(name) ?? -Infinity;
+    if (name === "ruk" && now - lastPlayed < 0.72) return;
+
+    const currentSource = this.driverSources.get(name);
+    if (currentSource) {
+      try {
+        currentSource.stop();
+      } catch {
+        // The previous driver call has already ended.
+      }
+    }
+
+    const source = this.playOneShot(name);
+    if (!source) return;
+    this.events[name] += 1;
+    this.lastDriverPlay.set(name, now);
+    this.driverSources.set(name, source);
+    source.onended = () => {
+      if (this.driverSources.get(name) === source) this.driverSources.delete(name);
+    };
   }
 
   triggerBump(intensity = 1) {

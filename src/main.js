@@ -31,6 +31,7 @@ const distanceLabel = document.querySelector("#distance");
 const remainingDistanceLabel = document.querySelector("#remaining-distance");
 const objectiveLabel = document.querySelector("#objective");
 const speedLabel = document.querySelector("#speed");
+const speedModeLabel = document.querySelector("#speed-mode");
 const checkpointMessage = document.querySelector("#checkpoint-message");
 const voiceButton = document.querySelector("#voice-button");
 const voiceLabel = document.querySelector("#voice-label");
@@ -56,16 +57,19 @@ cart.position.set(START_X, 0.05, START_Z);
 scene.add(cart);
 const dustSystem = new DustSystem(scene);
 
-const controls = new Controls(document);
 const audioManager = new AudioManager(soundButton);
+const controls = new Controls({
+  root: document,
+  onSpeedLevelChange: ({ direction }) => {
+    audioManager.playDriverCommand(direction);
+    reactDriver(animationParts, direction);
+  },
+});
 const voiceControls = new VoiceControls({
   button: voiceButton,
   label: voiceLabel,
   message: voiceMessage,
   controls,
-  onCommand: (command) => {
-    reactDriver(animationParts, command);
-  },
 });
 const clock = new THREE.Clock();
 const chasePosition = new THREE.Vector3();
@@ -89,11 +93,8 @@ let checkpointTimer = 0;
 
 const tuning = {
   maxForward: 5.2,
-  maxReverse: -1.55,
   acceleration: 1.65,
-  braking: 2.75,
-  voiceBraking: 0.95,
-  rollingDrag: 0.48,
+  deceleration: 1.45,
   steering: 0.52,
 };
 
@@ -125,7 +126,8 @@ function beginJourneyFinish() {
   if (state.journeyStatus !== "playing") return;
   state.progress = JOURNEY_DISTANCE;
   state.journeyStatus = "finishing";
-  controls.setVoiceCommand("off");
+  controls.resetAll();
+  controls.setEnabled(false);
   hint.classList.add("hidden");
 }
 
@@ -133,8 +135,8 @@ function completeJourney() {
   if (state.journeyStatus === "reached") return;
   state.speed = 0;
   state.journeyStatus = "reached";
-  controls.reset();
-  controls.setVoiceCommand("off");
+  controls.resetAll();
+  controls.setEnabled(false);
   touchControls.classList.add("hidden");
   checkpointMessage.classList.add("hidden");
   finishScreen.classList.remove("is-hidden");
@@ -157,7 +159,7 @@ function updateJourneyProgress() {
 function updateMovement(delta) {
   const input = state.journeyStatus === "playing"
     ? controls.getCombinedState()
-    : { forward: false, brake: false, left: false, right: false };
+    : { left: false, right: false, targetSpeed: 0 };
   const oldX = cart.position.x;
   const oldZ = cart.position.z;
 
@@ -166,25 +168,31 @@ function updateMovement(delta) {
   } else if (state.journeyStatus === "finishing") {
     state.speed = damp(state.speed, 0, 2.25, delta);
     if (Math.abs(state.speed) < 0.025) completeJourney();
-  } else if (input.forward) {
-    const pull = 0.62 + Math.min(Math.max(state.speed, 0) / tuning.maxForward, 1) * 0.38;
-    state.speed += tuning.acceleration * pull * delta;
-  } else if (input.brake) {
-    if (controls.voice.brake && !controls.state.brake) {
-      if (state.speed > 0) state.speed = Math.max(0, state.speed - tuning.voiceBraking * delta);
-      else if (state.speed < 0) state.speed = Math.min(0, state.speed + tuning.voiceBraking * delta);
-      if (state.speed === 0) controls.releaseVoiceBrake();
-    } else if (state.speed > 0.08) {
-      state.speed -= tuning.braking * delta;
-    } else {
-      state.speed -= tuning.acceleration * 0.6 * delta;
-    }
   } else {
-    state.speed = damp(state.speed, 0, tuning.rollingDrag, delta);
+    const targetSpeed = input.targetSpeed;
+    if (state.speed < targetSpeed) {
+      const pull =
+        0.62
+        + Math.min(Math.max(state.speed, 0) / tuning.maxForward, 1) * 0.38;
+      state.speed = Math.min(
+        targetSpeed,
+        state.speed + tuning.acceleration * pull * delta,
+      );
+    } else if (state.speed > targetSpeed) {
+      const slowingRate = targetSpeed === 0
+        ? tuning.deceleration
+        : tuning.deceleration * 0.82;
+      state.speed = Math.max(
+        targetSpeed,
+        state.speed - slowingRate * delta,
+      );
+    }
   }
 
-  state.speed = THREE.MathUtils.clamp(state.speed, tuning.maxReverse, tuning.maxForward);
-  if (Math.abs(state.speed) < 0.015 && !input.forward && !input.brake) state.speed = 0;
+  state.speed = THREE.MathUtils.clamp(state.speed, -0.65, tuning.maxForward);
+  if (Math.abs(state.speed - input.targetSpeed) < 0.015) {
+    state.speed = input.targetSpeed;
+  }
 
   const steerInput = (input.left ? 1 : 0) - (input.right ? 1 : 0);
   const speedRatio = Math.min(Math.abs(state.speed) / tuning.maxForward, 1);
@@ -202,7 +210,6 @@ function updateMovement(delta) {
     state.speed *= -0.12;
     state.collisionPulse = 0.16;
     state.collisionStrength = 0.65;
-    controls.setVoiceCommand("off");
   } else {
     cart.position.x = THREE.MathUtils.clamp(nextX, -125, 125);
     cart.position.z = THREE.MathUtils.clamp(nextZ, -345, 495);
@@ -286,6 +293,7 @@ function updateHud() {
     ? "Village reached"
     : `Reach the village - ${Math.ceil(remaining)}m`;
   speedLabel.textContent = `${Math.abs(state.speed * 3.6).toFixed(1)} km/h`;
+  speedModeLabel.textContent = controls.getSpeedMode();
   if (import.meta.env.DEV) {
     document.body.dataset.gameState = JSON.stringify({
       started: state.started,
@@ -303,10 +311,12 @@ function updateHud() {
         bull.legs.map((leg) => Number(leg.root.rotation.x.toFixed(3)))
       ),
       suspensionY: Number(animationParts.sprungGroup.position.y.toFixed(3)),
+      driverReaction: Number(animationParts.driverReaction.toFixed(3)),
+      driverReinReaction: Number(animationParts.driverReinReaction.toFixed(3)),
       dustParticles: dustSystem.getActiveCount(),
       audio: audioManager.getDebugState(),
       input: controls.getCombinedState(),
-      voiceInput: { ...controls.voice },
+      voiceEnabled: voiceControls.enabled,
       environment: villageLife.counts,
     });
   }
@@ -327,6 +337,8 @@ function animate() {
 function startGame() {
   state.started = true;
   state.journeyStatus = "playing";
+  controls.resetAll();
+  controls.setEnabled(true);
   startScreen.classList.add("is-hidden");
   hud.classList.remove("hidden");
   hint.classList.remove("hidden");
@@ -344,8 +356,8 @@ function startGame() {
 
 function replayGame() {
   window.clearTimeout(checkpointTimer);
-  controls.reset();
-  controls.setVoiceCommand("off");
+  controls.resetAll();
+  controls.setEnabled(true);
   roadGameplay.reset();
   dustSystem.reset();
   resetCartAnimation(animationParts);

@@ -1,3 +1,5 @@
+import { MAX_CART_SPEED } from "./controls.js";
+
 const AUDIO_ASSETS = {
   village: "/assets/audio/village-ambience.mp3",
   hoof: "/assets/audio/bull-foot-walk.mp3",
@@ -237,7 +239,7 @@ export class AudioManager {
   }
 
   updateMovement({ speed, delta, steering }) {
-    const movement = Math.min(Math.abs(speed) / 5.2, 1);
+    const movement = Math.min(Math.abs(speed) / MAX_CART_SPEED, 1);
     const moving = movement > 0.035;
     this.setLoopVolume("hoof", moving ? VOLUMES.hoof * (0.72 + movement * 0.28) : 0);
     this.setLoopVolume("cart", VOLUMES.cart * movement);

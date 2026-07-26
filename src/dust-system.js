@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { MAX_CART_SPEED } from "./controls.js";
 
 const DUST_COLOR = new THREE.Color(0xb99763);
 const HOOF_ANCHORS = [
@@ -49,7 +50,7 @@ export class DustSystem {
   }
 
   update({ cart, speed, travelledDistance, delta }) {
-    const movement = Math.min(Math.abs(speed) / 5.2, 1);
+    const movement = Math.min(Math.abs(speed) / MAX_CART_SPEED, 1);
     const travelled = Math.abs(travelledDistance);
     if (movement > 0.04 && travelled > 0) {
       this.spawnAccumulator += travelled * (0.8 + movement * 1.8);

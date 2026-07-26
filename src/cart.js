@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { MAX_CART_SPEED } from "./controls.js";
 
 const mat = (color, roughness = 0.86) => new THREE.MeshStandardMaterial({ color, roughness });
 const WOOD = mat(0x6b351b);
@@ -444,7 +445,7 @@ export function animateCart(
     1 - Math.exp(-(targetWalk ? 6 : 4) * delta),
   );
 
-  const movement = Math.min(Math.abs(speed) / 4.8, 1);
+  const movement = Math.min(Math.abs(speed) / MAX_CART_SPEED, 1);
   const gaitPhase = parts.gaitDistance * 3.35;
   const stepIndex = Math.floor(gaitPhase / Math.PI);
   const stepContact = stepIndex !== parts.lastStepIndex && parts.walkBlend > 0.2;

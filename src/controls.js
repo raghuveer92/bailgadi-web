@@ -4,7 +4,14 @@ const GAME_KEYS = new Set([
 ]);
 
 export const SPEED_MODES = ["STOPPED", "SLOW", "NORMAL", "FAST", "MAX"];
-export const SPEED_TARGETS = [0, 1.55, 2.8, 4.05, 5.2];
+export const MAX_CART_SPEED = 30 / 3.6;
+export const SPEED_TARGETS = [
+  0,
+  10 / 3.6,
+  20 / 3.6,
+  25 / 3.6,
+  MAX_CART_SPEED,
+];
 
 export class Controls {
   constructor({ root = document, onSpeedLevelChange = () => {} } = {}) {

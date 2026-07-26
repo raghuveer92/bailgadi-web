@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import "./style.css";
 import { AudioManager } from "./audio-manager.js";
-import { Controls } from "./controls.js";
+import { Controls, MAX_CART_SPEED } from "./controls.js";
 import {
   animateCart,
   createBullockCart,
@@ -92,7 +92,7 @@ const state = {
 let checkpointTimer = 0;
 
 const tuning = {
-  maxForward: 5.2,
+  maxForward: MAX_CART_SPEED,
   acceleration: 1.65,
   deceleration: 1.45,
   steering: 0.52,

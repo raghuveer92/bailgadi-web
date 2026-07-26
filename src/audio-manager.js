@@ -1,20 +1,18 @@
 const AUDIO_ASSETS = {
-  village: "/assets/audio/village-ambience.wav",
-  birds: "/assets/audio/birds.wav",
-  hoof: "/assets/audio/bull-hoof.wav",
-  bell: "/assets/audio/bull-bell.wav",
-  cart: "/assets/audio/cart-wheels.wav",
-  creak: "/assets/audio/cart-creak.wav",
+  village: "/assets/audio/village-ambience.mp3",
+  hoof: "/assets/audio/bull-foot-walk.mp3",
+  cart: "/assets/audio/wooden-cart-running.mp3",
+  breathing: "/assets/audio/bull-breathing.mp3",
+  bump: "/assets/audio/cart-bump.mp3",
 };
 
 const VOLUMES = {
   master: 1,
-  village: 0.2,
-  birds: 0.15,
+  village: 0.18,
   hoof: 0.45,
-  bell: 0.35,
-  cart: 0.3,
-  creak: 0.22,
+  cart: 0.28,
+  breathing: 0.12,
+  bump: 0.3,
 };
 
 function safeSessionValue(key) {
@@ -39,12 +37,12 @@ export class AudioManager {
     this.loops = new Map();
     this.loopVolumes = new Map([
       ["village", VOLUMES.village],
-      ["birds", VOLUMES.birds],
+      ["breathing", VOLUMES.breathing],
+      ["hoof", 0],
       ["cart", 0],
     ]);
-    this.distanceToBell = 7;
-    this.distanceToCreak = 10;
-    this.events = { footsteps: 0, bells: 0, creaks: 0 };
+    this.bumpTimer = 4 + Math.random() * 4;
+    this.events = { bumps: 0 };
 
     this.button.addEventListener("click", () => this.setMuted(!this.muted));
     this.updateButton();
@@ -102,7 +100,7 @@ export class AudioManager {
       this.buffers.set(name, buffer);
       console.info(`[Audio] Loaded: ${name}`);
 
-      if (name === "village" || name === "birds" || name === "cart") {
+      if (name === "village" || name === "breathing" || name === "hoof" || name === "cart") {
         this.ensureLoop(name);
       }
     } catch {
@@ -130,6 +128,12 @@ export class AudioManager {
     const loop = this.loops.get(name);
     if (!loop || !this.context) return;
     loop.gain.gain.setTargetAtTime(volume, this.context.currentTime, 0.08);
+  }
+
+  setLoopPlaybackRate(name, playbackRate) {
+    const loop = this.loops.get(name);
+    if (!loop || !this.context) return;
+    loop.source.playbackRate.setTargetAtTime(playbackRate, this.context.currentTime, 0.1);
   }
 
   setMuted(muted) {
@@ -168,39 +172,38 @@ export class AudioManager {
     source.start();
   }
 
-  updateMovement({ speed, travelledDistance, stepContact }) {
+  updateMovement({ speed, delta, steering }) {
     const movement = Math.min(Math.abs(speed) / 5.2, 1);
+    const moving = movement > 0.035;
+    this.setLoopVolume("hoof", moving ? VOLUMES.hoof * (0.72 + movement * 0.28) : 0);
     this.setLoopVolume("cart", VOLUMES.cart * movement);
-    if (!this.unlocked || movement < 0.05) return;
+    this.setLoopPlaybackRate("hoof", 0.84 + movement * 0.28);
+    this.setLoopPlaybackRate("cart", 0.88 + movement * 0.2);
+    if (!this.unlocked || !moving) return;
 
-    if (stepContact) {
-      this.events.footsteps += 1;
-      this.playOneShot("hoof", 0.72 + movement * 0.28, 0.92 + movement * 0.14);
-    }
-
-    const distance = Math.abs(travelledDistance);
-    this.distanceToBell -= distance;
-    this.distanceToCreak -= distance;
-
-    if (this.distanceToBell <= 0) {
-      this.events.bells += 1;
-      this.playOneShot("bell", 0.75 + movement * 0.25, 0.96 + Math.random() * 0.08);
-      this.distanceToBell = 10 + (5.5 - 10) * movement + Math.random() * 4;
-    }
-    if (this.distanceToCreak <= 0) {
-      this.events.creaks += 1;
-      this.playOneShot("creak", 0.7 + movement * 0.3, 0.92 + Math.random() * 0.1);
-      this.distanceToCreak = 13 + Math.random() * 12;
+    this.bumpTimer -= delta * (0.65 + movement * 1.35 + steering * 0.8);
+    if (this.bumpTimer <= 0) {
+      this.events.bumps += 1;
+      this.playOneShot("bump", 0.78 + movement * 0.22, 0.96 + Math.random() * 0.08);
+      this.bumpTimer = 5.5 + Math.random() * 6;
     }
   }
 
   getDebugState() {
+    const loops = {};
+    this.loops.forEach((loop, name) => {
+      loops[name] = {
+        volume: Number(loop.gain.gain.value.toFixed(3)),
+        playbackRate: Number(loop.source.playbackRate.value.toFixed(3)),
+      };
+    });
     return {
       muted: this.muted,
       unlocked: this.unlocked,
       contextState: this.context?.state ?? "not-created",
       loaded: [...this.buffers.keys()],
       failed: [...this.failed],
+      loops,
       events: { ...this.events },
     };
   }

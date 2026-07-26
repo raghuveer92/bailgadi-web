@@ -143,7 +143,7 @@ function updateMovement(delta) {
   const travelledDistance =
     (cart.position.x - oldX) * headingVector.x
     + (cart.position.z - oldZ) * headingVector.z;
-  const animationEvents = animateCart(
+  animateCart(
     animationParts,
     state.speed,
     travelledDistance,
@@ -153,8 +153,8 @@ function updateMovement(delta) {
   dustSystem.update({ cart, speed: state.speed, travelledDistance, delta });
   audioManager.updateMovement({
     speed: state.speed,
-    travelledDistance,
-    stepContact: animationEvents.stepContact,
+    delta,
+    steering: Math.abs(steerInput) * speedRatio,
   });
 }
 

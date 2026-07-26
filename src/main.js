@@ -1,7 +1,9 @@
 import * as THREE from "three";
 import "./style.css";
+import { AudioManager } from "./audio-manager.js";
 import { Controls } from "./controls.js";
-import { animateCart, createBullockCart } from "./cart.js";
+import { animateCart, createBullockCart, reactDriver } from "./cart.js";
+import { DustSystem } from "./dust-system.js";
 import { VoiceControls } from "./voice-controls.js";
 import { createWorld } from "./world.js";
 
@@ -16,6 +18,7 @@ const speedLabel = document.querySelector("#speed");
 const voiceButton = document.querySelector("#voice-button");
 const voiceLabel = document.querySelector("#voice-label");
 const voiceMessage = document.querySelector("#voice-message");
+const soundButton = document.querySelector("#sound-button");
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 450);
@@ -33,13 +36,19 @@ const { obstacles, sun } = createWorld(scene);
 const { group: cart, animationParts } = createBullockCart();
 cart.position.set(0, 0.05, -20);
 scene.add(cart);
+const dustSystem = new DustSystem(scene);
 
 const controls = new Controls(document);
+const audioManager = new AudioManager(soundButton);
 const voiceControls = new VoiceControls({
   button: voiceButton,
   label: voiceLabel,
   message: voiceMessage,
   controls,
+  onCommand: (command) => {
+    reactDriver(animationParts, command);
+    audioManager.reactToDriver(command);
+  },
 });
 const clock = new THREE.Clock();
 const chasePosition = new THREE.Vector3();
@@ -61,7 +70,8 @@ const tuning = {
   maxReverse: -1.55,
   acceleration: 1.65,
   braking: 2.75,
-  rollingDrag: 0.72,
+  voiceBraking: 0.95,
+  rollingDrag: 0.48,
   steering: 0.52,
 };
 
@@ -86,11 +96,12 @@ function updateMovement(delta) {
   const oldZ = cart.position.z;
 
   if (input.forward) {
-    state.speed += tuning.acceleration * delta;
+    const pull = 0.62 + Math.min(Math.max(state.speed, 0) / tuning.maxForward, 1) * 0.38;
+    state.speed += tuning.acceleration * pull * delta;
   } else if (input.brake) {
     if (controls.voice.brake && !controls.state.brake) {
-      if (state.speed > 0) state.speed = Math.max(0, state.speed - tuning.braking * delta);
-      else if (state.speed < 0) state.speed = Math.min(0, state.speed + tuning.braking * delta);
+      if (state.speed > 0) state.speed = Math.max(0, state.speed - tuning.voiceBraking * delta);
+      else if (state.speed < 0) state.speed = Math.min(0, state.speed + tuning.voiceBraking * delta);
       if (state.speed === 0) controls.releaseVoiceBrake();
     } else if (state.speed > 0.08) {
       state.speed -= tuning.braking * delta;
@@ -119,6 +130,7 @@ function updateMovement(delta) {
   if (obstacleHit(nextX, nextZ)) {
     state.speed *= -0.12;
     state.collisionPulse = 0.16;
+    controls.setVoiceCommand("off");
   } else {
     cart.position.x = THREE.MathUtils.clamp(nextX, -125, 125);
     cart.position.z = THREE.MathUtils.clamp(nextZ, -345, 495);
@@ -132,7 +144,19 @@ function updateMovement(delta) {
   const travelledDistance =
     (cart.position.x - oldX) * headingVector.x
     + (cart.position.z - oldZ) * headingVector.z;
-  animateCart(animationParts, state.speed, travelledDistance, state.elapsed, delta);
+  const animationEvents = animateCart(
+    animationParts,
+    state.speed,
+    travelledDistance,
+    state.elapsed,
+    delta,
+  );
+  dustSystem.update({ cart, speed: state.speed, travelledDistance, delta });
+  audioManager.updateMovement({
+    speed: state.speed,
+    travelledDistance,
+    stepContact: animationEvents.stepContact,
+  });
 }
 
 function updateCamera(delta) {
@@ -180,6 +204,10 @@ function updateHud() {
         bull.legs.map((leg) => Number(leg.root.rotation.x.toFixed(3)))
       ),
       suspensionY: Number(animationParts.sprungGroup.position.y.toFixed(3)),
+      dustParticles: dustSystem.getActiveCount(),
+      audio: audioManager.getDebugState(),
+      input: controls.getCombinedState(),
+      voiceInput: { ...controls.voice },
     });
   }
 }
@@ -201,6 +229,7 @@ function startGame() {
   hud.classList.remove("hidden");
   hint.classList.remove("hidden");
   touchControls.classList.remove("hidden");
+  audioManager.start();
   playButton.blur();
   setTimeout(() => hint.classList.add("hidden"), 7000);
 }
@@ -263,5 +292,12 @@ if (voiceTest) {
   voiceControls.applyCommand("forward");
   if (voiceTest === "brake") {
     setTimeout(() => voiceControls.applyCommand("brake"), 900);
+  } else if (voiceTest === "manualbrake") {
+    setTimeout(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowDown", bubbles: true }));
+    }, 900);
+    setTimeout(() => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { code: "ArrowDown", bubbles: true }));
+    }, 1250);
   }
 }

@@ -173,6 +173,12 @@ h1 {
   pointer-events: auto;
 }
 
+.hud-audio-row {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+}
+
 #voice-button {
   min-width: 154px;
   min-height: 42px;
@@ -187,6 +193,31 @@ h1 {
   font: 700 12px/1 Arial, sans-serif;
   letter-spacing: 0.05em;
   transition: transform 0.16s, background 0.2s, border-color 0.2s;
+}
+
+#sound-button {
+  width: 44px;
+  min-width: 44px;
+  min-height: 42px;
+  padding: 0;
+  border: 1px solid rgba(255, 244, 210, 0.42);
+  border-radius: 4px;
+  color: #fff5d8;
+  background: rgba(18, 45, 32, 0.74);
+  box-shadow: 0 8px 24px rgba(13, 33, 23, 0.18);
+  backdrop-filter: blur(7px);
+  cursor: pointer;
+  font-size: 18px;
+  transition: transform 0.16s, border-color 0.2s;
+}
+
+#sound-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(244, 211, 114, 0.82);
+}
+
+#sound-button:active {
+  transform: scale(0.95);
 }
 
 #voice-button:hover:not(:disabled) {
@@ -451,6 +482,12 @@ h1 {
     min-height: 48px;
     padding: 11px 12px;
     font-size: 11px;
+  }
+
+  #sound-button {
+    width: 48px;
+    min-width: 48px;
+    min-height: 48px;
   }
 
   #voice-message {

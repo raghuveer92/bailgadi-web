@@ -334,6 +334,8 @@ export function createBullockCart() {
     walkBlend: 0,
     suspensionY: 0,
     suspensionRoll: 0,
+    driverReaction: 0,
+    lastStepIndex: 0,
   };
 
   const bulls = new THREE.Group();
@@ -427,6 +429,9 @@ export function animateCart(parts, speed, travelledDistance, elapsed, delta) {
 
   const movement = Math.min(Math.abs(speed) / 4.8, 1);
   const gaitPhase = parts.gaitDistance * 3.35;
+  const stepIndex = Math.floor(gaitPhase / Math.PI);
+  const stepContact = stepIndex !== parts.lastStepIndex && parts.walkBlend > 0.2;
+  parts.lastStepIndex = stepIndex;
 
   parts.bulls.forEach((bullData) => {
     const phase = gaitPhase + bullData.phaseOffset;
@@ -483,7 +488,18 @@ export function animateCart(parts, speed, travelledDistance, elapsed, delta) {
   parts.sprungGroup.position.y = parts.suspensionY;
   parts.sprungGroup.rotation.z = parts.suspensionRoll;
 
-  parts.driver.rotation.x = -parts.suspensionY * 0.65;
+  parts.driverReaction = THREE.MathUtils.lerp(
+    parts.driverReaction,
+    0,
+    1 - Math.exp(-3.4 * delta),
+  );
+  parts.driver.rotation.x = -parts.suspensionY * 0.65 + parts.driverReaction;
   parts.driver.rotation.z = -parts.suspensionRoll * 0.75;
   parts.driver.position.y = 1.88 + Math.sin(elapsed * 1.4) * 0.006;
+
+  return { stepContact };
+}
+
+export function reactDriver(parts, command) {
+  parts.driverReaction = command === "forward" ? 0.09 : -0.055;
 }

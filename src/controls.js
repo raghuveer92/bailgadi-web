@@ -36,6 +36,7 @@ export class Controls {
       const set = (active, event) => {
         event.preventDefault();
         this.state[control] = active;
+        if (active && control === "brake") this.setVoiceCommand("off");
         button.classList.toggle("active", active);
         if (active && button.setPointerCapture) button.setPointerCapture(event.pointerId);
       };
@@ -53,7 +54,9 @@ export class Controls {
   onKey(event, active) {
     if (!GAME_KEYS.has(event.code)) return;
     event.preventDefault();
-    this.state[this.keyMap[event.code]] = active;
+    const control = this.keyMap[event.code];
+    this.state[control] = active;
+    if (active && control === "brake") this.setVoiceCommand("off");
   }
 
   reset() {

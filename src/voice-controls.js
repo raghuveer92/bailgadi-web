@@ -1,7 +1,7 @@
-const GO_HINDI = ["चल चल", "चल"];
-const STOP_HINDI = ["रुक रुक", "रुक"];
-const GO_ENGLISH = /(^|\s)chal(?:\s+chal)?(?=\s|$|[.,!?])/;
-const STOP_ENGLISH = /(^|\s)ruk(?:\s+ruk)?(?=\s|$|[.,!?])/;
+const GO_HINDI = ["चल चल", "चलो", "चल"];
+const STOP_HINDI = ["रुक रुक", "रुको", "रुक"];
+const GO_ENGLISH = /(^|\s)chalo?(?:\s+chalo?)?(?=\s|$|[.,!?])/;
+const STOP_ENGLISH = /(^|\s)ruko?(?:\s+ruko?)?(?=\s|$|[.,!?])/;
 
 export function matchVoiceCommand(transcript) {
   const normalized = transcript
@@ -19,15 +19,17 @@ export function matchVoiceCommand(transcript) {
 }
 
 export class VoiceControls {
-  constructor({ button, label, message, controls }) {
+  constructor({ button, label, message, controls, onCommand = () => {} }) {
     this.button = button;
     this.label = label;
     this.message = message;
     this.controls = controls;
+    this.onCommand = onCommand;
     this.enabled = false;
     this.starting = false;
     this.restartTimer = null;
     this.statusTimer = null;
+    this.errorStreak = 0;
 
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     this.supported = Boolean(Recognition);
@@ -36,7 +38,7 @@ export class VoiceControls {
     if (!this.supported) {
       this.button.disabled = true;
       this.button.setAttribute("aria-disabled", "true");
-      this.message.textContent = "Voice control is not supported in this browser.";
+      this.message.textContent = "Voice control unavailable in this browser";
       return;
     }
 
@@ -52,6 +54,7 @@ export class VoiceControls {
     };
 
     this.recognition.onresult = (event) => {
+      this.errorStreak = 0;
       for (let resultIndex = event.resultIndex; resultIndex < event.results.length; resultIndex += 1) {
         const result = event.results[resultIndex];
         if (!result.isFinal) continue;
@@ -73,7 +76,10 @@ export class VoiceControls {
       } else if (event.error === "audio-capture") {
         this.disable("No microphone is available.");
       } else if (event.error === "network" && this.enabled) {
+        this.errorStreak += 1;
         this.message.textContent = "Voice connection interrupted. Retrying…";
+      } else if (event.error !== "no-speech" && event.error !== "aborted") {
+        this.errorStreak += 1;
       }
     };
 
@@ -145,6 +151,10 @@ export class VoiceControls {
 
   scheduleRestart() {
     clearTimeout(this.restartTimer);
+    if (this.errorStreak >= 4) {
+      this.disable("Voice listening paused. Tap to retry.");
+      return;
+    }
     this.restartTimer = setTimeout(() => this.startRecognition(), 300);
   }
 
@@ -158,16 +168,17 @@ export class VoiceControls {
 
   applyCommand(command) {
     this.controls.setVoiceCommand(command);
+    this.onCommand(command);
     clearTimeout(this.statusTimer);
     this.button.classList.remove("listening", "command-go", "command-stop");
 
     if (command === "forward") {
       this.button.classList.add("command-go");
-      this.label.textContent = "✅ “Chal Chal”";
+      this.label.textContent = "🐂 Chal Chal!";
       this.message.textContent = "Cart moving forward";
     } else {
       this.button.classList.add("command-stop");
-      this.label.textContent = "🛑 “Ruk Ruk”";
+      this.label.textContent = "✋ Ruk Ruk!";
       this.message.textContent = "Cart braking";
     }
 

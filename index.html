@@ -46,9 +46,23 @@
           </div>
           <p id="voice-message" role="status"></p>
           <div id="voice-debug" class="voice-debug">
-            <div><span>START</span><strong id="voice-debug-start">0%</strong></div>
-            <div><span>STOP</span><strong id="voice-debug-stop">0%</strong></div>
-            <div><span>Background Noise</span><strong id="voice-debug-background">0%</strong></div>
+            <div><span>START:</span><strong id="voice-debug-start">0%</strong></div>
+            <div><span>STOP:</span><strong id="voice-debug-stop">0%</strong></div>
+            <div><span>Background Noise:</span><strong id="voice-debug-background">0%</strong></div>
+            <div class="voice-debug-summary"><span>Top prediction:</span><strong id="voice-top-prediction">Background Noise</strong></div>
+            <div><span>Confidence:</span><strong id="voice-top-confidence">0%</strong></div>
+            <div class="voice-debug-summary"><span>Candidate:</span><strong id="voice-candidate">NONE</strong></div>
+            <div><span>Confirmation:</span><strong id="voice-confirmation">0/2</strong></div>
+            <div><span>Input active:</span><strong id="voice-input-active">NO</strong></div>
+            <div><span>Recognition:</span><strong id="voice-recognition-state">ARMED</strong></div>
+            <div class="voice-debug-summary"><span>Mic permission:</span><strong id="voice-mic-permission">NOT REQUESTED</strong></div>
+            <div><span>Recognizer loaded:</span><strong id="voice-recognizer-loaded">NO</strong></div>
+            <div><span>Recognizer listening:</span><strong id="voice-recognizer-listening">NO</strong></div>
+            <div><span>Prediction callbacks:</span><strong id="voice-prediction-callbacks">0</strong></div>
+            <div><span>AudioContext:</span><strong id="voice-audio-context">unavailable</strong></div>
+            <div><span>Microphone device detected:</span><strong id="voice-mic-detected">NO</strong></div>
+            <div><span>Mic input level:</span><strong id="voice-mic-level">0%</strong></div>
+            <p id="voice-trigger-notice" class="voice-trigger-notice" aria-live="polite"></p>
             <p>Last detected: <strong id="voice-last-detected">None</strong></p>
           </div>
         </div>

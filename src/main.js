@@ -11,7 +11,7 @@ import {
 } from "./cart.js";
 import { DustSystem } from "./dust-system.js";
 import { createRoadGameplay } from "./road-gameplay.js";
-import { COOLDOWN_MS, VoiceControls } from "./voice-controls.js";
+import { COOLDOWN_MS, MIN_INPUT_LEVEL, VoiceControls } from "./voice-controls.js";
 import { createWorld } from "./world.js";
 
 const JOURNEY_DISTANCE = 500;
@@ -78,7 +78,23 @@ const voiceControls = new VoiceControls({
     STOP: document.querySelector("#voice-debug-stop"),
     "Background Noise": document.querySelector("#voice-debug-background"),
   },
+  topPrediction: document.querySelector("#voice-top-prediction"),
+  topConfidence: document.querySelector("#voice-top-confidence"),
+  triggerNotice: document.querySelector("#voice-trigger-notice"),
   lastDetected: voiceLastDetected,
+  debugStatus: {
+    micPermission: document.querySelector("#voice-mic-permission"),
+    recognizerLoaded: document.querySelector("#voice-recognizer-loaded"),
+    recognizerListening: document.querySelector("#voice-recognizer-listening"),
+    predictionCallbacks: document.querySelector("#voice-prediction-callbacks"),
+    audioContext: document.querySelector("#voice-audio-context"),
+    micDetected: document.querySelector("#voice-mic-detected"),
+    micLevel: document.querySelector("#voice-mic-level"),
+    candidate: document.querySelector("#voice-candidate"),
+    confirmation: document.querySelector("#voice-confirmation"),
+    inputActive: document.querySelector("#voice-input-active"),
+    recognition: document.querySelector("#voice-recognition-state"),
+  },
 });
 const clock = new THREE.Clock();
 const chasePosition = new THREE.Vector3();
@@ -452,18 +468,29 @@ if (voiceTest) {
     voiceControls.loadModel()
       .then(() => {
         voiceControls.enabled = true;
+        voiceControls.micInputLevel = MIN_INPUT_LEVEL + 1;
         const scores = (background, start, stop) => {
           const values = { "Background Noise": background, START: start, STOP: stop };
           return voiceControls.labels.map((label) => values[label] ?? 0);
         };
         voiceControls.handleScores(scores(0.04, 0.93, 0.03));
         voiceControls.handleScores(scores(0.03, 0.95, 0.02));
+        voiceControls.handleScores(scores(0.02, 0.96, 0.02));
+        voiceControls.handleScores(scores(0.02, 0.97, 0.01));
         const startMode = controls.getSpeedMode();
+        voiceControls.handleScores(scores(0.02, 0.01, 0.97));
+        voiceControls.handleScores(scores(0.02, 0.01, 0.97));
+        voiceControls.handleScores(scores(0.02, 0.01, 0.97));
+        const trailingMode = controls.getSpeedMode();
         setTimeout(() => {
+          voiceControls.handleScores(scores(0.95, 0.02, 0.03));
           voiceControls.handleScores(scores(0.03, 0.02, 0.95));
+          voiceControls.handleScores(scores(0.02, 0.02, 0.96));
+          voiceControls.handleScores(scores(0.01, 0.01, 0.98));
           document.body.dataset.voiceModelTest = JSON.stringify({
             labels: voiceControls.labels,
             startMode,
+            trailingMode,
             stopMode: controls.getSpeedMode(),
             lastDetected: voiceLastDetected.textContent,
           });

@@ -285,7 +285,7 @@ h1 {
 }
 
 .voice-debug {
-  width: 205px;
+  width: 245px;
   padding: 8px 10px;
   border: 1px solid rgba(255, 244, 210, 0.24);
   border-radius: 4px;
@@ -305,6 +305,25 @@ h1 {
 .voice-debug > div strong {
   color: #f4d372;
   font-variant-numeric: tabular-nums;
+}
+
+.voice-debug-summary {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 244, 210, 0.16);
+}
+
+.voice-trigger-notice {
+  min-height: 13px;
+  color: #b5e284;
+  font-weight: 800 !important;
+  letter-spacing: 0.06em;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.voice-trigger-notice.visible {
+  opacity: 1;
 }
 
 .voice-debug p {
@@ -621,7 +640,7 @@ h1 {
   }
 
   .voice-debug {
-    width: 180px;
+    width: min(225px, calc(100vw - 32px));
     padding: 7px 9px;
     font-size: 8px;
   }

@@ -172,6 +172,16 @@ export class AudioManager {
     source.start();
   }
 
+  triggerBump(intensity = 1) {
+    this.events.bumps += 1;
+    this.playOneShot(
+      "bump",
+      intensity,
+      0.96 + Math.random() * 0.08,
+    );
+    this.bumpTimer = Math.max(this.bumpTimer, 2.5);
+  }
+
   updateMovement({ speed, delta, steering }) {
     const movement = Math.min(Math.abs(speed) / 5.2, 1);
     const moving = movement > 0.035;
@@ -183,8 +193,7 @@ export class AudioManager {
 
     this.bumpTimer -= delta * (0.65 + movement * 1.35 + steering * 0.8);
     if (this.bumpTimer <= 0) {
-      this.events.bumps += 1;
-      this.playOneShot("bump", 0.78 + movement * 0.22, 0.96 + Math.random() * 0.08);
+      this.triggerBump(0.78 + movement * 0.22);
       this.bumpTimer = 5.5 + Math.random() * 6;
     }
   }

@@ -129,17 +129,20 @@ h1 {
   transition: transform 0.16s, box-shadow 0.16s, background 0.16s;
 }
 
-#play-button span {
+#play-button span,
+#replay-button span {
   margin-left: 8px;
 }
 
-#play-button:hover {
+#play-button:hover,
+#replay-button:hover {
   background: #ffda76;
   transform: translateY(-2px);
   box-shadow: 0 8px 0 #9a6e28, 0 16px 26px rgba(7, 20, 14, 0.28);
 }
 
-#play-button:active {
+#play-button:active,
+#replay-button:active {
   transform: translateY(4px);
   box-shadow: 0 2px 0 #9a6e28;
 }
@@ -161,6 +164,25 @@ h1 {
   align-items: flex-start;
   pointer-events: none;
   transition: opacity 0.3s;
+}
+
+#objective {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  margin: 0;
+  padding: 8px 12px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 244, 210, 0.34);
+  border-radius: 3px;
+  color: #fff4d0;
+  background: rgba(18, 45, 32, 0.65);
+  box-shadow: 0 8px 24px rgba(13, 33, 23, 0.14);
+  backdrop-filter: blur(7px);
+  font: 700 10px/1 Arial, sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .voice-control {
@@ -370,6 +392,64 @@ h1 {
   transition: opacity 0.5s;
 }
 
+.checkpoint-message {
+  position: fixed;
+  z-index: 11;
+  top: 22%;
+  left: 50%;
+  min-width: 180px;
+  padding: 12px 18px;
+  transform: translate(-50%, 0);
+  border: 1px solid rgba(255, 240, 188, 0.55);
+  border-radius: 3px;
+  color: #fff4d0;
+  background: rgba(24, 58, 40, 0.78);
+  box-shadow: 0 12px 34px rgba(9, 28, 19, 0.24);
+  backdrop-filter: blur(7px);
+  font: 700 13px/1 "Arial Narrow", Arial, sans-serif;
+  letter-spacing: 0.11em;
+  text-align: center;
+  text-transform: uppercase;
+  pointer-events: none;
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.checkpoint-message.hidden {
+  transform: translate(-50%, -8px);
+}
+
+.finish-card {
+  padding-top: 40px;
+}
+
+.finish-card h2 {
+  margin: 12px 0 8px;
+  color: #fff4d0;
+  font: 800 clamp(38px, 9vw, 56px)/0.95 Impact, "Arial Narrow", sans-serif;
+  letter-spacing: -0.01em;
+  text-shadow: 0 4px 0 rgba(97, 62, 26, 0.25);
+}
+
+.finish-copy {
+  margin: 0 0 24px;
+  color: rgba(255, 248, 232, 0.78);
+  font-size: 13px;
+}
+
+#replay-button {
+  width: 190px;
+  height: 54px;
+  border: 0;
+  border-radius: 2px;
+  color: #26301e;
+  background: #efc65f;
+  box-shadow: 0 6px 0 #9a6e28, 0 12px 24px rgba(7, 20, 14, 0.25);
+  cursor: pointer;
+  font: 800 18px/1 "Arial Narrow", Arial, sans-serif;
+  letter-spacing: 0.16em;
+  transition: transform 0.16s, box-shadow 0.16s, background 0.16s;
+}
+
 #touch-controls {
   position: fixed;
   z-index: 12;
@@ -461,8 +541,8 @@ h1 {
   }
 
   .stats > div {
-    min-width: 77px;
-    padding: 9px 9px 8px;
+    min-width: 58px;
+    padding: 9px 6px 8px;
   }
 
   .stats strong {
@@ -475,6 +555,13 @@ h1 {
 
   .voice-control {
     top: 52px;
+  }
+
+  #objective {
+    top: 124px;
+    left: 0;
+    transform: none;
+    font-size: 8px;
   }
 
   #voice-button {

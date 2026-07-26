@@ -125,4 +125,18 @@ export class DustSystem {
   getActiveCount() {
     return this.particles.reduce((total, particle) => total + Number(particle.active), 0);
   }
+
+  reset() {
+    this.spawnAccumulator = 0;
+    this.particles.forEach((particle, index) => {
+      particle.active = false;
+      particle.life = 0;
+      this.positions[index * 3 + 1] = -100;
+      this.colors[index * 3] = 0;
+      this.colors[index * 3 + 1] = 0;
+      this.colors[index * 3 + 2] = 0;
+    });
+    this.points.geometry.attributes.position.needsUpdate = true;
+    this.points.geometry.attributes.color.needsUpdate = true;
+  }
 }

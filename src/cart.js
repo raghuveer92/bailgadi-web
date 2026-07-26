@@ -336,6 +336,9 @@ export function createBullockCart() {
     suspensionRoll: 0,
     driverReaction: 0,
     lastStepIndex: 0,
+    roadImpactStrength: 0,
+    roadImpactSide: 0,
+    roadImpactTime: 0,
   };
 
   const bulls = new THREE.Group();
@@ -414,7 +417,14 @@ export function createBullockCart() {
   return { group, animationParts };
 }
 
-export function animateCart(parts, speed, travelledDistance, elapsed, delta) {
+export function animateCart(
+  parts,
+  speed,
+  travelledDistance,
+  elapsed,
+  delta,
+  roadSurface = { roughness: 0, roll: 0 },
+) {
   parts.wheels.forEach((wheel) => {
     wheel.rotation.x += travelledDistance / 1.36;
   });
@@ -468,13 +478,39 @@ export function animateCart(parts, speed, travelledDistance, elapsed, delta) {
     bullData.tail.rotation.x = -0.08 + Math.sin(elapsed * 0.9 + bullData.phaseOffset) * 0.045;
   });
 
+  const roadRoughness = THREE.MathUtils.clamp(roadSurface.roughness ?? 0, 0, 1);
+  const roadRipple =
+    Math.sin(parts.gaitDistance * 4.7 + 0.35)
+    + Math.sin(parts.gaitDistance * 2.15 + 1.2) * 0.45;
+  let impactY = 0;
+  let impactRoll = 0;
+  if (parts.roadImpactStrength > 0.001) {
+    parts.roadImpactTime += delta;
+    const impactDecay = Math.exp(-parts.roadImpactTime * 4.8);
+    impactY =
+      Math.sin(parts.roadImpactTime * 24) * parts.roadImpactStrength * impactDecay;
+    impactRoll =
+      Math.sin(parts.roadImpactTime * 19)
+      * parts.roadImpactStrength
+      * parts.roadImpactSide
+      * 0.42
+      * impactDecay;
+    if (impactDecay < 0.025) parts.roadImpactStrength = 0;
+  }
+
   const suspensionTargetY =
     movement * (
       Math.sin(elapsed * (4.2 + movement * 2.4)) * 0.018
       + Math.abs(Math.sin(gaitPhase * 0.72)) * 0.02
-    );
+      + roadRipple * roadRoughness * 0.018
+    )
+    + impactY;
   const suspensionTargetRoll =
-    movement * Math.sin(elapsed * 3.1 + 0.5) * 0.014;
+    movement * (
+      Math.sin(elapsed * 3.1 + 0.5) * 0.014
+      + (roadSurface.roll ?? 0) * roadRoughness * 0.016
+    )
+    + impactRoll;
   parts.suspensionY = THREE.MathUtils.lerp(
     parts.suspensionY,
     suspensionTargetY,
@@ -502,4 +538,39 @@ export function animateCart(parts, speed, travelledDistance, elapsed, delta) {
 
 export function reactDriver(parts, command) {
   parts.driverReaction = command === "forward" ? 0.09 : -0.055;
+}
+
+export function triggerCartBump(parts, intensity = 1, side = 0) {
+  parts.roadImpactStrength = Math.max(parts.roadImpactStrength, 0.11 * intensity);
+  parts.roadImpactSide = side || (Math.random() > 0.5 ? 0.35 : -0.35);
+  parts.roadImpactTime = 0;
+}
+
+export function resetCartAnimation(parts) {
+  parts.gaitDistance = 0;
+  parts.walkBlend = 0;
+  parts.suspensionY = 0;
+  parts.suspensionRoll = 0;
+  parts.driverReaction = 0;
+  parts.roadImpactStrength = 0;
+  parts.roadImpactSide = 0;
+  parts.roadImpactTime = 0;
+  parts.lastStepIndex = 0;
+  parts.wheels.forEach((wheel) => {
+    wheel.rotation.x = 0;
+  });
+  parts.bulls.forEach((bull) => {
+    bull.legSwing.fill(0);
+    bull.kneeBend.fill(0);
+    bull.upperBody.position.y = 0;
+    bull.head.rotation.x = -0.08;
+    bull.legs.forEach((leg) => {
+      leg.root.rotation.x = 0;
+      leg.knee.rotation.x = 0;
+    });
+  });
+  parts.sprungGroup.position.y = 0;
+  parts.sprungGroup.rotation.z = 0;
+  parts.driver.rotation.set(0, 0, 0);
+  parts.driver.position.y = 1.88;
 }

@@ -2,19 +2,36 @@ import * as THREE from "three";
 import "./style.css";
 import { AudioManager } from "./audio-manager.js";
 import { Controls } from "./controls.js";
-import { animateCart, createBullockCart, reactDriver } from "./cart.js";
+import {
+  animateCart,
+  createBullockCart,
+  reactDriver,
+  resetCartAnimation,
+  triggerCartBump,
+} from "./cart.js";
 import { DustSystem } from "./dust-system.js";
+import { createRoadGameplay } from "./road-gameplay.js";
 import { VoiceControls } from "./voice-controls.js";
 import { createWorld } from "./world.js";
 
+const JOURNEY_DISTANCE = 500;
+const START_X = 0;
+const START_Z = -20;
+const CHECKPOINTS = [400, 300, 200, 100];
+
 const root = document.querySelector("#canvas-root");
 const startScreen = document.querySelector("#start-screen");
+const finishScreen = document.querySelector("#finish-screen");
 const playButton = document.querySelector("#play-button");
+const replayButton = document.querySelector("#replay-button");
 const hud = document.querySelector("#hud");
 const hint = document.querySelector("#hint");
 const touchControls = document.querySelector("#touch-controls");
 const distanceLabel = document.querySelector("#distance");
+const remainingDistanceLabel = document.querySelector("#remaining-distance");
+const objectiveLabel = document.querySelector("#objective");
 const speedLabel = document.querySelector("#speed");
+const checkpointMessage = document.querySelector("#checkpoint-message");
 const voiceButton = document.querySelector("#voice-button");
 const voiceLabel = document.querySelector("#voice-label");
 const voiceMessage = document.querySelector("#voice-message");
@@ -33,8 +50,9 @@ renderer.toneMappingExposure = 1.05;
 root.appendChild(renderer.domElement);
 
 const { obstacles, sun } = createWorld(scene);
+const roadGameplay = createRoadGameplay(scene);
 const { group: cart, animationParts } = createBullockCart();
-cart.position.set(0, 0.05, -20);
+cart.position.set(START_X, 0.05, START_Z);
 scene.add(cart);
 const dustSystem = new DustSystem(scene);
 
@@ -60,9 +78,14 @@ const state = {
   speed: 0,
   heading: 0,
   distance: 0,
+  progress: 0,
   elapsed: 0,
   collisionPulse: 0,
+  collisionStrength: 0,
+  journeyStatus: "ready",
+  passedCheckpoints: new Set(),
 };
+let checkpointTimer = 0;
 
 const tuning = {
   maxForward: 5.2,
@@ -81,7 +104,7 @@ function damp(current, target, smoothing, delta) {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-smoothing * delta));
 }
 
-function obstacleHit(nextX, nextZ) {
+function sceneryObstacleHit(nextX, nextZ) {
   return obstacles.some((obstacle) => {
     const dx = nextX - obstacle.x;
     const dz = nextZ - obstacle.z;
@@ -89,12 +112,61 @@ function obstacleHit(nextX, nextZ) {
   });
 }
 
+function showCheckpoint(remaining) {
+  window.clearTimeout(checkpointTimer);
+  checkpointMessage.textContent = `${remaining} m to the village`;
+  checkpointMessage.classList.remove("hidden");
+  checkpointTimer = window.setTimeout(() => {
+    checkpointMessage.classList.add("hidden");
+  }, 2100);
+}
+
+function beginJourneyFinish() {
+  if (state.journeyStatus !== "playing") return;
+  state.progress = JOURNEY_DISTANCE;
+  state.journeyStatus = "finishing";
+  controls.setVoiceCommand("off");
+  hint.classList.add("hidden");
+}
+
+function completeJourney() {
+  if (state.journeyStatus === "reached") return;
+  state.speed = 0;
+  state.journeyStatus = "reached";
+  controls.reset();
+  controls.setVoiceCommand("off");
+  touchControls.classList.add("hidden");
+  checkpointMessage.classList.add("hidden");
+  finishScreen.classList.remove("is-hidden");
+  replayButton.focus({ preventScroll: true });
+}
+
+function updateJourneyProgress() {
+  if (state.journeyStatus !== "playing") return;
+  state.progress = THREE.MathUtils.clamp(cart.position.z - START_Z, 0, JOURNEY_DISTANCE);
+  const remaining = Math.max(0, JOURNEY_DISTANCE - state.progress);
+  CHECKPOINTS.forEach((checkpoint) => {
+    if (remaining <= checkpoint && !state.passedCheckpoints.has(checkpoint)) {
+      state.passedCheckpoints.add(checkpoint);
+      showCheckpoint(checkpoint);
+    }
+  });
+  if (remaining <= 0) beginJourneyFinish();
+}
+
 function updateMovement(delta) {
-  const input = controls.getCombinedState();
+  const input = state.journeyStatus === "playing"
+    ? controls.getCombinedState()
+    : { forward: false, brake: false, left: false, right: false };
   const oldX = cart.position.x;
   const oldZ = cart.position.z;
 
-  if (input.forward) {
+  if (state.journeyStatus === "reached") {
+    state.speed = 0;
+  } else if (state.journeyStatus === "finishing") {
+    state.speed = damp(state.speed, 0, 2.25, delta);
+    if (Math.abs(state.speed) < 0.025) completeJourney();
+  } else if (input.forward) {
     const pull = 0.62 + Math.min(Math.max(state.speed, 0) / tuning.maxForward, 1) * 0.38;
     state.speed += tuning.acceleration * pull * delta;
   } else if (input.brake) {
@@ -126,14 +198,14 @@ function updateMovement(delta) {
   const nextX = cart.position.x + headingVector.x * moveDistance;
   const nextZ = cart.position.z + headingVector.z * moveDistance;
 
-  if (obstacleHit(nextX, nextZ)) {
+  if (sceneryObstacleHit(nextX, nextZ)) {
     state.speed *= -0.12;
     state.collisionPulse = 0.16;
+    state.collisionStrength = 0.65;
     controls.setVoiceCommand("off");
   } else {
     cart.position.x = THREE.MathUtils.clamp(nextX, -125, 125);
     cart.position.z = THREE.MathUtils.clamp(nextZ, -345, 495);
-    if (state.speed > 0) state.distance += Math.abs(moveDistance);
   }
 
   cart.rotation.y = state.heading;
@@ -143,12 +215,30 @@ function updateMovement(delta) {
   const travelledDistance =
     (cart.position.x - oldX) * headingVector.x
     + (cart.position.z - oldZ) * headingVector.z;
+  if (travelledDistance > 0 && state.journeyStatus === "playing") {
+    state.distance += travelledDistance;
+  }
+
+  if (Math.abs(state.speed) > 0.18 && state.journeyStatus === "playing") {
+    const impact = roadGameplay.checkImpact(cart.position, state.heading);
+    if (impact) {
+      state.speed *= 1 - impact.severity * 0.22;
+      state.collisionPulse = 0.3;
+      state.collisionStrength = impact.severity;
+      triggerCartBump(animationParts, impact.severity, impact.side);
+      audioManager.triggerBump(0.78 + impact.severity * 0.22);
+    }
+  }
+
+  updateJourneyProgress();
+  const roadSurface = roadGameplay.sampleSurface(cart.position);
   animateCart(
     animationParts,
     state.speed,
     travelledDistance,
     state.elapsed,
     delta,
+    roadSurface,
   );
   dustSystem.update({ cart, speed: state.speed, travelledDistance, delta });
   audioManager.updateMovement({
@@ -169,9 +259,10 @@ function updateCamera(delta) {
   chasePosition.addScaledVector(side, -steer * 0.7);
 
   if (state.collisionPulse > 0) {
-    state.collisionPulse -= delta;
-    chasePosition.x += (Math.random() - 0.5) * 0.25;
-    chasePosition.y += (Math.random() - 0.5) * 0.18;
+    state.collisionPulse = Math.max(0, state.collisionPulse - delta);
+    const shake = state.collisionStrength * Math.min(state.collisionPulse / 0.3, 1);
+    chasePosition.x += (Math.random() - 0.5) * 0.28 * shake;
+    chasePosition.y += (Math.random() - 0.5) * 0.2 * shake;
   }
 
   camera.position.lerp(chasePosition, 1 - Math.exp(-3.8 * delta));
@@ -186,15 +277,24 @@ function updateCamera(delta) {
 }
 
 function updateHud() {
+  const remaining = Math.max(0, JOURNEY_DISTANCE - state.progress);
   distanceLabel.textContent = state.distance < 1000
     ? `${Math.floor(state.distance)} m`
     : `${(state.distance / 1000).toFixed(2)} km`;
+  remainingDistanceLabel.textContent = `${Math.ceil(remaining)} m`;
+  objectiveLabel.textContent = state.journeyStatus === "reached"
+    ? "Village reached"
+    : `Reach the village - ${Math.ceil(remaining)}m`;
   speedLabel.textContent = `${Math.abs(state.speed * 3.6).toFixed(1)} km/h`;
   if (import.meta.env.DEV) {
     document.body.dataset.gameState = JSON.stringify({
       started: state.started,
       speed: Number(state.speed.toFixed(3)),
       distance: Number(state.distance.toFixed(3)),
+      progress: Number(state.progress.toFixed(3)),
+      remaining: Number(remaining.toFixed(3)),
+      journeyStatus: state.journeyStatus,
+      passedCheckpoints: [...state.passedCheckpoints],
       cart: cart.position.toArray().map((value) => Number(value.toFixed(3))),
       camera: camera.position.toArray().map((value) => Number(value.toFixed(3))),
       heading: Number(state.heading.toFixed(3)),
@@ -224,6 +324,7 @@ function animate() {
 
 function startGame() {
   state.started = true;
+  state.journeyStatus = "playing";
   startScreen.classList.add("is-hidden");
   hud.classList.remove("hidden");
   hint.classList.remove("hidden");
@@ -239,7 +340,35 @@ function startGame() {
   }
 }
 
+function replayGame() {
+  window.clearTimeout(checkpointTimer);
+  controls.reset();
+  controls.setVoiceCommand("off");
+  roadGameplay.reset();
+  dustSystem.reset();
+  resetCartAnimation(animationParts);
+  state.speed = 0;
+  state.heading = 0;
+  state.distance = 0;
+  state.progress = 0;
+  state.elapsed = 0;
+  state.collisionPulse = 0;
+  state.collisionStrength = 0;
+  state.journeyStatus = "playing";
+  state.passedCheckpoints.clear();
+  cart.position.set(START_X, 0.05, START_Z);
+  cart.rotation.set(0, 0, 0);
+  previousPosition.copy(cart.position);
+  camera.position.set(0, 8.5, -33);
+  camera.lookAt(0, 1.3, -14);
+  finishScreen.classList.add("is-hidden");
+  checkpointMessage.classList.add("hidden");
+  touchControls.classList.remove("hidden");
+  replayButton.blur();
+}
+
 playButton.addEventListener("click", startGame);
+replayButton.addEventListener("click", replayGame);
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -255,6 +384,8 @@ window.__bailgadi = {
     started: state.started,
     speed: state.speed,
     distance: state.distance,
+    remaining: Math.max(0, JOURNEY_DISTANCE - state.progress),
+    journeyStatus: state.journeyStatus,
     cartPosition: cart.position.toArray(),
     cartHeading: state.heading,
     cameraPosition: camera.position.toArray(),

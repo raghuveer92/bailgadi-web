@@ -11,6 +11,10 @@ export class Controls {
       left: false,
       right: false,
     };
+    this.voice = {
+      forward: false,
+      brake: false,
+    };
 
     this.keyMap = {
       KeyW: "forward",
@@ -56,5 +60,27 @@ export class Controls {
     Object.keys(this.state).forEach((key) => { this.state[key] = false; });
     document.querySelectorAll("[data-control].active").forEach((button) => button.classList.remove("active"));
   }
-}
 
+  getCombinedState() {
+    if (this.state.brake) {
+      return { ...this.state, forward: false, brake: true };
+    }
+    if (this.state.forward) {
+      return { ...this.state, forward: true, brake: false };
+    }
+    return {
+      ...this.state,
+      forward: this.voice.forward,
+      brake: this.voice.brake,
+    };
+  }
+
+  setVoiceCommand(command) {
+    this.voice.forward = command === "forward";
+    this.voice.brake = command === "brake";
+  }
+
+  releaseVoiceBrake() {
+    this.voice.brake = false;
+  }
+}

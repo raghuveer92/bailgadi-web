@@ -163,6 +163,84 @@ h1 {
   transition: opacity 0.3s;
 }
 
+.voice-control {
+  position: absolute;
+  top: 60px;
+  right: 0;
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  pointer-events: auto;
+}
+
+#voice-button {
+  min-width: 154px;
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid rgba(255, 244, 210, 0.42);
+  border-radius: 4px;
+  color: #fff5d8;
+  background: rgba(18, 45, 32, 0.74);
+  box-shadow: 0 8px 24px rgba(13, 33, 23, 0.18);
+  backdrop-filter: blur(7px);
+  cursor: pointer;
+  font: 700 12px/1 Arial, sans-serif;
+  letter-spacing: 0.05em;
+  transition: transform 0.16s, background 0.2s, border-color 0.2s;
+}
+
+#voice-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(244, 211, 114, 0.82);
+}
+
+#voice-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+#voice-button.listening {
+  border-color: rgba(244, 211, 114, 0.82);
+  background: rgba(31, 77, 52, 0.88);
+  animation: voice-pulse 1.7s ease-in-out infinite;
+}
+
+#voice-button.command-go {
+  border-color: rgba(181, 226, 132, 0.9);
+  background: rgba(47, 102, 53, 0.9);
+}
+
+#voice-button.command-stop {
+  border-color: rgba(244, 159, 120, 0.9);
+  background: rgba(126, 49, 37, 0.9);
+}
+
+#voice-button:disabled {
+  cursor: default;
+  opacity: 0.68;
+}
+
+#voice-message {
+  max-width: 230px;
+  min-height: 13px;
+  margin: 0;
+  color: rgba(255, 248, 232, 0.82);
+  font-size: 9px;
+  line-height: 1.35;
+  letter-spacing: 0.03em;
+  text-align: right;
+  text-shadow: 0 2px 8px rgba(18, 37, 23, 0.5);
+}
+
+@keyframes voice-pulse {
+  0%,
+  100% {
+    box-shadow: 0 8px 24px rgba(13, 33, 23, 0.18);
+  }
+  50% {
+    box-shadow: 0 8px 24px rgba(13, 33, 23, 0.18), 0 0 0 4px rgba(244, 211, 114, 0.14);
+  }
+}
+
 .hidden {
   opacity: 0;
   pointer-events: none !important;
@@ -362,6 +440,22 @@ h1 {
 
   .stats small {
     font-size: 7px;
+  }
+
+  .voice-control {
+    top: 52px;
+  }
+
+  #voice-button {
+    min-width: 142px;
+    min-height: 48px;
+    padding: 11px 12px;
+    font-size: 11px;
+  }
+
+  #voice-message {
+    max-width: 185px;
+    font-size: 8px;
   }
 }
 

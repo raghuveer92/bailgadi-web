@@ -2,6 +2,7 @@ import * as THREE from "three";
 import "./style.css";
 import { Controls } from "./controls.js";
 import { animateCart, createBullockCart } from "./cart.js";
+import { VoiceControls } from "./voice-controls.js";
 import { createWorld } from "./world.js";
 
 const root = document.querySelector("#canvas-root");
@@ -12,6 +13,9 @@ const hint = document.querySelector("#hint");
 const touchControls = document.querySelector("#touch-controls");
 const distanceLabel = document.querySelector("#distance");
 const speedLabel = document.querySelector("#speed");
+const voiceButton = document.querySelector("#voice-button");
+const voiceLabel = document.querySelector("#voice-label");
+const voiceMessage = document.querySelector("#voice-message");
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 450);
@@ -31,6 +35,12 @@ cart.position.set(0, 0.05, -20);
 scene.add(cart);
 
 const controls = new Controls(document);
+const voiceControls = new VoiceControls({
+  button: voiceButton,
+  label: voiceLabel,
+  message: voiceMessage,
+  controls,
+});
 const clock = new THREE.Clock();
 const chasePosition = new THREE.Vector3();
 const lookTarget = new THREE.Vector3();
@@ -71,15 +81,22 @@ function obstacleHit(nextX, nextZ) {
 }
 
 function updateMovement(delta) {
-  const input = controls.state;
+  const input = controls.getCombinedState();
   const oldX = cart.position.x;
   const oldZ = cart.position.z;
 
   if (input.forward) {
     state.speed += tuning.acceleration * delta;
   } else if (input.brake) {
-    if (state.speed > 0.08) state.speed -= tuning.braking * delta;
-    else state.speed -= tuning.acceleration * 0.6 * delta;
+    if (controls.voice.brake && !controls.state.brake) {
+      if (state.speed > 0) state.speed = Math.max(0, state.speed - tuning.braking * delta);
+      else if (state.speed < 0) state.speed = Math.min(0, state.speed + tuning.braking * delta);
+      if (state.speed === 0) controls.releaseVoiceBrake();
+    } else if (state.speed > 0.08) {
+      state.speed -= tuning.braking * delta;
+    } else {
+      state.speed -= tuning.acceleration * 0.6 * delta;
+    }
   } else {
     state.speed = damp(state.speed, 0, tuning.rollingDrag, delta);
   }
@@ -207,7 +224,8 @@ window.__bailgadi = {
     cartPosition: cart.position.toArray(),
     cartHeading: state.heading,
     cameraPosition: camera.position.toArray(),
-    controls: { ...controls.state },
+    controls: controls.getCombinedState(),
+    voiceEnabled: voiceControls.enabled,
   }),
   start: startGame,
 };
@@ -235,4 +253,15 @@ if (autoTest) {
     window.dispatchEvent(new KeyboardEvent("keyup", { code: "ArrowLeft", bubbles: true }));
     window.dispatchEvent(new KeyboardEvent("keyup", { code: driveKey, bubbles: true }));
   }, 1600);
+}
+
+const voiceTest = import.meta.env.DEV
+  ? new URLSearchParams(window.location.search).get("voicetest")
+  : null;
+if (voiceTest) {
+  startGame();
+  voiceControls.applyCommand("forward");
+  if (voiceTest === "brake") {
+    setTimeout(() => voiceControls.applyCommand("brake"), 900);
+  }
 }

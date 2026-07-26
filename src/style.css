@@ -284,6 +284,40 @@ h1 {
   text-shadow: 0 2px 8px rgba(18, 37, 23, 0.5);
 }
 
+.voice-debug {
+  width: 205px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 244, 210, 0.24);
+  border-radius: 4px;
+  color: rgba(255, 248, 232, 0.82);
+  background: rgba(12, 31, 22, 0.72);
+  box-shadow: 0 8px 24px rgba(13, 33, 23, 0.16);
+  backdrop-filter: blur(7px);
+  font: 700 9px/1.45 Arial, sans-serif;
+}
+
+.voice-debug > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.voice-debug > div strong {
+  color: #f4d372;
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-debug p {
+  margin: 5px 0 0;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 244, 210, 0.16);
+  font-weight: 400;
+}
+
+.voice-debug p strong {
+  color: #fff5d8;
+}
+
 @keyframes voice-pulse {
   0%,
   100% {
@@ -583,6 +617,12 @@ h1 {
 
   #voice-message {
     max-width: 185px;
+    font-size: 8px;
+  }
+
+  .voice-debug {
+    width: 180px;
+    padding: 7px 9px;
     font-size: 8px;
   }
 }

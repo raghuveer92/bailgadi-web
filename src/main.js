@@ -11,7 +11,7 @@ import {
 } from "./cart.js";
 import { DustSystem } from "./dust-system.js";
 import { createRoadGameplay } from "./road-gameplay.js";
-import { VoiceControls } from "./voice-controls.js";
+import { COOLDOWN_MS, VoiceControls } from "./voice-controls.js";
 import { createWorld } from "./world.js";
 
 const JOURNEY_DISTANCE = 500;
@@ -36,6 +36,8 @@ const checkpointMessage = document.querySelector("#checkpoint-message");
 const voiceButton = document.querySelector("#voice-button");
 const voiceLabel = document.querySelector("#voice-label");
 const voiceMessage = document.querySelector("#voice-message");
+const voiceDebugPanel = document.querySelector("#voice-debug");
+const voiceLastDetected = document.querySelector("#voice-last-detected");
 const soundButton = document.querySelector("#sound-button");
 
 const scene = new THREE.Scene();
@@ -70,6 +72,13 @@ const voiceControls = new VoiceControls({
   label: voiceLabel,
   message: voiceMessage,
   controls,
+  debugPanel: voiceDebugPanel,
+  debugValues: {
+    START: document.querySelector("#voice-debug-start"),
+    STOP: document.querySelector("#voice-debug-stop"),
+    "Background Noise": document.querySelector("#voice-debug-background"),
+  },
+  lastDetected: voiceLastDetected,
 });
 const clock = new THREE.Clock();
 const chasePosition = new THREE.Vector3();
@@ -439,15 +448,44 @@ const voiceTest = import.meta.env.DEV
   : null;
 if (voiceTest) {
   startGame();
-  voiceControls.applyCommand("forward");
-  if (voiceTest === "brake") {
-    setTimeout(() => voiceControls.applyCommand("brake"), 900);
-  } else if (voiceTest === "manualbrake") {
-    setTimeout(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowDown", bubbles: true }));
-    }, 900);
-    setTimeout(() => {
-      window.dispatchEvent(new KeyboardEvent("keyup", { code: "ArrowDown", bubbles: true }));
-    }, 1250);
+  if (voiceTest === "model") {
+    voiceControls.loadModel()
+      .then(() => {
+        voiceControls.enabled = true;
+        const scores = (background, start, stop) => {
+          const values = { "Background Noise": background, START: start, STOP: stop };
+          return voiceControls.labels.map((label) => values[label] ?? 0);
+        };
+        voiceControls.handleScores(scores(0.04, 0.93, 0.03));
+        voiceControls.handleScores(scores(0.03, 0.95, 0.02));
+        const startMode = controls.getSpeedMode();
+        setTimeout(() => {
+          voiceControls.handleScores(scores(0.03, 0.02, 0.95));
+          document.body.dataset.voiceModelTest = JSON.stringify({
+            labels: voiceControls.labels,
+            startMode,
+            stopMode: controls.getSpeedMode(),
+            lastDetected: voiceLastDetected.textContent,
+          });
+          voiceControls.enabled = false;
+        }, COOLDOWN_MS + 100);
+      })
+      .catch((error) => {
+        document.body.dataset.voiceModelTest = JSON.stringify({
+          error: error?.message || String(error),
+        });
+      });
+  } else {
+    voiceControls.applyCommand("forward");
+    if (voiceTest === "brake") {
+      setTimeout(() => voiceControls.applyCommand("brake"), 900);
+    } else if (voiceTest === "manualbrake") {
+      setTimeout(() => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowDown", bubbles: true }));
+      }, 900);
+      setTimeout(() => {
+        window.dispatchEvent(new KeyboardEvent("keyup", { code: "ArrowDown", bubbles: true }));
+      }, 1250);
+    }
   }
 }

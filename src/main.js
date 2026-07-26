@@ -47,7 +47,6 @@ const voiceControls = new VoiceControls({
   controls,
   onCommand: (command) => {
     reactDriver(animationParts, command);
-    audioManager.reactToDriver(command);
   },
 });
 const clock = new THREE.Clock();
@@ -232,6 +231,12 @@ function startGame() {
   audioManager.start();
   playButton.blur();
   setTimeout(() => hint.classList.add("hidden"), 7000);
+  if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("audiotest")) {
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowUp", bubbles: true }));
+    setTimeout(() => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { code: "ArrowUp", bubbles: true }));
+    }, 6500);
+  }
 }
 
 playButton.addEventListener("click", startGame);

@@ -49,7 +49,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 root.appendChild(renderer.domElement);
 
-const { obstacles, sun } = createWorld(scene);
+const { obstacles, sun, villageLife } = createWorld(scene);
 const roadGameplay = createRoadGameplay(scene);
 const { group: cart, animationParts } = createBullockCart();
 cart.position.set(START_X, 0.05, START_Z);
@@ -307,6 +307,7 @@ function updateHud() {
       audio: audioManager.getDebugState(),
       input: controls.getCombinedState(),
       voiceInput: { ...controls.voice },
+      environment: villageLife.counts,
     });
   }
 }
@@ -315,6 +316,7 @@ function animate() {
   const delta = Math.min(clock.getDelta(), 0.05);
   state.elapsed += delta;
   if (state.started) updateMovement(delta);
+  villageLife.update({ cartPosition: cart.position, elapsed: state.elapsed, delta });
   updateCamera(delta);
   updateHud();
   renderer.render(scene, camera);

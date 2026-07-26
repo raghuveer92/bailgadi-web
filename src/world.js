@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { createVillageLife } from "./environment-life.js";
 
 const mat = (color, roughness = 0.9) => new THREE.MeshStandardMaterial({ color, roughness });
 const materials = {
@@ -39,6 +40,7 @@ function enableShadows(object, cast = true) {
 
 function createTree(scale = 1, variant = 0) {
   const tree = new THREE.Group();
+  const windParts = [];
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.46, 3.5, 7), materials.trunk);
   trunk.position.y = 1.75;
   tree.add(trunk);
@@ -54,8 +56,10 @@ function createTree(scale = 1, variant = 0) {
     crown.position.set(x, y, z);
     crown.rotation.set(variant * 0.3, x, z);
     tree.add(crown);
+    windParts.push(crown);
   });
   tree.scale.setScalar(scale);
+  tree.userData.windParts = windParts;
   return enableShadows(tree);
 }
 
@@ -98,19 +102,33 @@ function createHouse(color = materials.plaster, straw = false) {
 
 function createField(width, depth, cropColor) {
   const group = new THREE.Group();
+  const crops = new THREE.Group();
+  crops.name = "Crops";
   const soil = new THREE.Mesh(new THREE.BoxGeometry(width, 0.12, depth), mat(0x8c6a3d));
   soil.position.y = 0.04;
   soil.receiveShadow = true;
   group.add(soil);
   const cropMaterial = mat(cropColor);
+  const cropPositions = [];
   for (let x = -width / 2 + 0.8; x < width / 2; x += 1.15) {
     for (let z = -depth / 2 + 0.7; z < depth / 2; z += 1.2) {
-      const crop = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.8, 5), cropMaterial);
-      crop.position.set(x, 0.45, z);
-      crop.castShadow = true;
-      group.add(crop);
+      cropPositions.push([x, z]);
     }
   }
+  const cropGeometry = new THREE.ConeGeometry(0.16, 0.8, 5);
+  const cropInstances = new THREE.InstancedMesh(cropGeometry, cropMaterial, cropPositions.length);
+  const transform = new THREE.Object3D();
+  cropPositions.forEach(([x, z], index) => {
+    transform.position.set(x, 0.45, z);
+    transform.updateMatrix();
+    cropInstances.setMatrixAt(index, transform.matrix);
+  });
+  cropInstances.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  cropInstances.castShadow = true;
+  cropInstances.receiveShadow = true;
+  crops.add(cropInstances);
+  group.add(crops);
+  group.userData.windParts = [crops];
   return group;
 }
 
@@ -129,6 +147,7 @@ function createRoadsideShrine() {
 
 export function createWorld(scene) {
   const obstacles = [];
+  const windTargets = [];
   const random = seeded();
 
   scene.background = new THREE.Color(0xa4cde3);
@@ -167,6 +186,19 @@ export function createWorld(scene) {
     const field = createField(w, d, color);
     field.position.set(x, 0.04, z);
     scene.add(field);
+    field.userData.windParts.forEach((object, index) => {
+      windTargets.push({
+        object,
+        worldX: x,
+        worldZ: z,
+        baseX: object.rotation.x,
+        baseZ: object.rotation.z,
+        phase: x * 0.17 + z * 0.09 + index * 0.7,
+        speed: 0.65 + (Math.abs(z) % 5) * 0.04,
+        amount: 0.0018,
+        range: 155,
+      });
+    });
   });
 
   const housePlacements = [
@@ -195,6 +227,19 @@ export function createWorld(scene) {
     tree.position.set(x, 0, z);
     tree.rotation.y = random() * Math.PI * 2;
     scene.add(tree);
+    tree.userData.windParts.forEach((object, partIndex) => {
+      windTargets.push({
+        object,
+        worldX: x,
+        worldZ: z,
+        baseX: object.rotation.x,
+        baseZ: object.rotation.z,
+        phase: i * 0.53 + partIndex * 0.8,
+        speed: 0.55 + (i % 4) * 0.07,
+        amount: 0.008,
+        range: 130,
+      });
+    });
     if (Math.abs(x) < 27) obstacles.push({ x, z, radius: 1.4 * scale });
   }
 
@@ -230,6 +275,8 @@ export function createWorld(scene) {
   pond.position.set(47, 0.08, 340);
   scene.add(pond);
 
+  const villageLife = createVillageLife(scene, { random, windTargets });
+
   const sun = new THREE.DirectionalLight(0xfff1c7, 3.1);
   sun.position.set(-42, 65, -25);
   sun.castShadow = true;
@@ -245,6 +292,5 @@ export function createWorld(scene) {
 
   scene.add(new THREE.HemisphereLight(0xcde7ff, 0x56713b, 1.85));
 
-  return { obstacles, sun };
+  return { obstacles, sun, villageLife };
 }
-

@@ -5,6 +5,7 @@ const GAME_KEYS = new Set([
 
 export const SPEED_MODES = ["STOPPED", "SLOW", "NORMAL", "FAST", "MAX"];
 export const MAX_CART_SPEED = 30 / 3.6;
+export const MAX_REVERSE_SPEED = 4 / 3.6;
 export const SPEED_TARGETS = [
   0,
   10 / 3.6,
@@ -19,6 +20,7 @@ export class Controls {
     this.onSpeedLevelChange = onSpeedLevelChange;
     this.enabled = false;
     this.speedLevel = 0;
+    this.reverseActive = false;
     this.state = {
       left: false,
       right: false,
@@ -27,8 +29,8 @@ export class Controls {
     this.keyMap = {
       KeyW: "forward",
       ArrowUp: "forward",
-      KeyS: "brake",
-      ArrowDown: "brake",
+      KeyS: "reverse",
+      ArrowDown: "reverse",
       KeyA: "left",
       ArrowLeft: "left",
       KeyD: "right",
@@ -41,12 +43,13 @@ export class Controls {
 
     root.querySelectorAll("[data-control]").forEach((button) => {
       const control = button.dataset.control;
-      if (control === "forward" || control === "brake") {
+      if (control === "forward" || control === "brake" || control === "reverse") {
         button.addEventListener("pointerdown", (event) => {
           event.preventDefault();
           if (!this.enabled) return;
           if (control === "forward") this.increaseSpeedLevel("touch");
-          else this.decreaseSpeedLevel("touch");
+          else if (control === "reverse") this.activateReverse("touch");
+          else this.stopSpeedLevel("touch");
           button.classList.add("active");
           if (button.setPointerCapture) button.setPointerCapture(event.pointerId);
         });
@@ -79,16 +82,26 @@ export class Controls {
     event.preventDefault();
     if (!this.enabled) return;
     const control = this.keyMap[event.code];
-    if (control === "forward" || control === "brake") {
+    if (control === "forward" || control === "brake" || control === "reverse") {
       if (!active || event.repeat) return;
       if (control === "forward") this.increaseSpeedLevel("keyboard");
-      else this.decreaseSpeedLevel("keyboard");
+      else if (control === "reverse") {
+        if (this.speedLevel > 0) this.stopSpeedLevel("keyboard");
+        else this.activateReverse("keyboard");
+      }
+      else this.stopSpeedLevel("keyboard");
       return;
     }
     this.state[control] = active;
   }
 
   increaseSpeedLevel(source = "input") {
+    if (this.reverseActive) {
+      this.reverseActive = false;
+      this.speedLevel = 0;
+      this.notifyDriveChange("brake", source, -1);
+      return true;
+    }
     if (!this.enabled || this.speedLevel >= SPEED_MODES.length - 1) return false;
     const previousLevel = this.speedLevel;
     this.speedLevel += 1;
@@ -108,18 +121,32 @@ export class Controls {
   }
 
   stopSpeedLevel(source = "input") {
-    if (!this.enabled || this.speedLevel <= 0) return false;
+    if (!this.enabled || (this.speedLevel <= 0 && !this.reverseActive)) return false;
+    const previousLevel = this.reverseActive ? -1 : this.speedLevel;
+    this.speedLevel = 0;
+    this.reverseActive = false;
+    this.notifyDriveChange("brake", source, previousLevel);
+    return true;
+  }
+
+  activateReverse(source = "input") {
+    if (!this.enabled || this.reverseActive) return false;
     const previousLevel = this.speedLevel;
     this.speedLevel = 0;
+    this.reverseActive = true;
+    this.notifyDriveChange("reverse", source, previousLevel);
+    return true;
+  }
+
+  notifyDriveChange(direction, source, previousLevel) {
     this.onSpeedLevelChange({
-      direction: "brake",
+      direction,
       source,
       previousLevel,
-      level: this.speedLevel,
-      mode: SPEED_MODES[this.speedLevel],
-      targetSpeed: SPEED_TARGETS[this.speedLevel],
+      level: this.reverseActive ? -1 : this.speedLevel,
+      mode: this.getSpeedMode(),
+      targetSpeed: this.getTargetSpeed(),
     });
-    return true;
   }
 
   setEnabled(enabled) {
@@ -138,20 +165,22 @@ export class Controls {
   resetAll() {
     this.resetSteering();
     this.speedLevel = 0;
+    this.reverseActive = false;
   }
 
   getTargetSpeed() {
-    return SPEED_TARGETS[this.speedLevel];
+    return this.reverseActive ? -MAX_REVERSE_SPEED : SPEED_TARGETS[this.speedLevel];
   }
 
   getSpeedMode() {
-    return SPEED_MODES[this.speedLevel];
+    return this.reverseActive ? "REVERSE" : SPEED_MODES[this.speedLevel];
   }
 
   getCombinedState() {
     return {
       ...this.state,
       speedLevel: this.speedLevel,
+      reverse: this.reverseActive,
       speedMode: this.getSpeedMode(),
       targetSpeed: this.getTargetSpeed(),
     };

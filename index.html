@@ -79,7 +79,7 @@
       </div>
 
       <div id="checkpoint-message" class="checkpoint-message hidden" role="status"></div>
-      <div id="hint" class="hidden">Tap W / ↑ for more speed · Tap S / ↓ to slow · A D to steer</div>
+      <div id="hint" class="hidden">Tap W / ↑ for more speed · Tap S / ↓ to stop, then reverse · A D to steer</div>
 
       <div id="touch-controls" class="hidden" aria-label="Touch controls">
         <div class="touch-steer">
@@ -87,6 +87,7 @@
           <button type="button" data-control="right" aria-label="Steer right">→</button>
         </div>
         <div class="touch-drive">
+          <button class="reverse" type="button" data-control="reverse" aria-label="Reverse cart"><span>▼</span><small>REVERSE</small></button>
           <button type="button" data-control="brake" aria-label="Reduce speed"><span>▼</span><small>BRAKE</small></button>
           <button class="forward" type="button" data-control="forward" aria-label="Move forward"><span>▲</span><small>FORWARD</small></button>
         </div>

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import "./style.css";
 import { AudioManager } from "./audio-manager.js";
-import { Controls, MAX_CART_SPEED } from "./controls.js";
+import { Controls, MAX_CART_SPEED, MAX_REVERSE_SPEED } from "./controls.js";
 import {
   animateCart,
   createBullockCart,
@@ -54,7 +54,11 @@ const movementDebug = {
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 450);
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+function getRenderPixelRatio() {
+  const mobileViewport = Math.min(window.innerWidth, window.innerHeight) < 800;
+  return Math.min(window.devicePixelRatio, mobileViewport ? 1.5 : 2);
+}
+renderer.setPixelRatio(getRenderPixelRatio());
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -74,8 +78,9 @@ const audioManager = new AudioManager(soundButton);
 const controls = new Controls({
   root: document,
   onSpeedLevelChange: ({ direction, source }) => {
-    if (source !== "voice-model") audioManager.playDriverCommand(direction);
-    reactDriver(animationParts, direction, source);
+    const driverDirection = direction === "forward" ? "forward" : "brake";
+    if (source !== "voice-model") audioManager.playDriverCommand(driverDirection);
+    reactDriver(animationParts, driverDirection, source);
   },
 });
 const voiceControls = new VoiceControls({
@@ -254,7 +259,11 @@ function updateMovement(delta) {
     }
   }
 
-  state.speed = THREE.MathUtils.clamp(state.speed, -0.65, tuning.maxForward);
+  state.speed = THREE.MathUtils.clamp(
+    state.speed,
+    -MAX_REVERSE_SPEED,
+    tuning.maxForward,
+  );
   const steerInput =
     (controls.state.left ? 1 : 0)
     - (controls.state.right ? 1 : 0);
@@ -510,7 +519,7 @@ window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(getRenderPixelRatio());
 });
 
 document.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });

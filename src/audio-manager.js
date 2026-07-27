@@ -48,6 +48,8 @@ export class AudioManager {
       ["cart", 0],
     ]);
     this.bumpTimer = 4 + Math.random() * 4;
+    this.bumpSource = null;
+    this.movementAmount = 0;
     this.events = { bumps: 0, chal: 0, ruk: 0 };
     this.driverSources = new Map();
     this.lastDriverPlay = new Map();
@@ -228,28 +230,40 @@ export class AudioManager {
     };
   }
 
-  triggerBump(intensity = 1) {
-    this.events.bumps += 1;
-    this.playOneShot(
+  triggerBump(intensity = 1, movement = this.movementAmount) {
+    if (!this.unlocked || movement <= 0.035 || this.bumpSource) return false;
+    const source = this.playOneShot(
       "bump",
       intensity,
       0.96 + Math.random() * 0.08,
     );
+    if (!source) return false;
+    this.events.bumps += 1;
+    this.bumpSource = source;
+    source.onended = () => {
+      if (this.bumpSource === source) this.bumpSource = null;
+    };
     this.bumpTimer = Math.max(this.bumpTimer, 2.5);
+    return true;
   }
 
-  updateMovement({ speed, delta, steering }) {
+  updateMovement(speed, delta, steering, gaitPlaybackRate, roadRoughness) {
     const movement = Math.min(Math.abs(speed) / MAX_CART_SPEED, 1);
+    this.movementAmount = movement;
     const moving = movement > 0.035;
-    this.setLoopVolume("hoof", moving ? VOLUMES.hoof * (0.72 + movement * 0.28) : 0);
-    this.setLoopVolume("cart", VOLUMES.cart * movement);
-    this.setLoopPlaybackRate("hoof", 0.84 + movement * 0.28);
-    this.setLoopPlaybackRate("cart", 0.88 + movement * 0.2);
+    this.setLoopVolume("breathing", VOLUMES.breathing * (1 - movement * 0.55));
+    this.setLoopVolume("hoof", moving ? VOLUMES.hoof * (0.62 + movement * 0.38) : 0);
+    this.setLoopVolume(
+      "cart",
+      VOLUMES.cart * movement * (0.82 + roadRoughness * 0.18),
+    );
+    this.setLoopPlaybackRate("hoof", gaitPlaybackRate);
+    this.setLoopPlaybackRate("cart", 0.78 + movement * 0.35);
     if (!this.unlocked || !moving) return;
 
     this.bumpTimer -= delta * (0.65 + movement * 1.35 + steering * 0.8);
     if (this.bumpTimer <= 0) {
-      this.triggerBump(0.78 + movement * 0.22);
+      this.triggerBump(0.72 + movement * 0.2 + roadRoughness * 0.08, movement);
       this.bumpTimer = 5.5 + Math.random() * 6;
     }
   }

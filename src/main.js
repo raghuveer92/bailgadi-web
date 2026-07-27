@@ -39,6 +39,17 @@ const voiceMessage = document.querySelector("#voice-message");
 const voiceDebugPanel = document.querySelector("#voice-debug");
 const voiceLastDetected = document.querySelector("#voice-last-detected");
 const soundButton = document.querySelector("#sound-button");
+const movementDebug = {
+  speedLevel: document.querySelector("#movement-speed-level"),
+  targetSpeed: document.querySelector("#movement-target-speed"),
+  actualSpeed: document.querySelector("#movement-actual-speed"),
+  acceleration: document.querySelector("#movement-acceleration"),
+  suspension: document.querySelector("#movement-suspension"),
+  cameraDistance: document.querySelector("#movement-camera-distance"),
+  ropeTension: document.querySelector("#movement-rope-tension"),
+  reinTension: document.querySelector("#movement-rein-tension"),
+  driverInput: document.querySelector("#movement-driver-input"),
+};
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 450);
@@ -62,9 +73,9 @@ const dustSystem = new DustSystem(scene);
 const audioManager = new AudioManager(soundButton);
 const controls = new Controls({
   root: document,
-  onSpeedLevelChange: ({ direction }) => {
-    audioManager.playDriverCommand(direction);
-    reactDriver(animationParts, direction);
+  onSpeedLevelChange: ({ direction, source }) => {
+    if (source !== "voice-model") audioManager.playDriverCommand(direction);
+    reactDriver(animationParts, direction, source);
   },
 });
 const voiceControls = new VoiceControls({
@@ -100,7 +111,10 @@ const clock = new THREE.Clock();
 const chasePosition = new THREE.Vector3();
 const lookTarget = new THREE.Vector3();
 const headingVector = new THREE.Vector3();
+const sideVector = new THREE.Vector3();
+const cameraOffset = new THREE.Vector3();
 const previousPosition = cart.position.clone();
+const roadSurface = { roughness: 0, roll: 0 };
 
 const state = {
   started: false,
@@ -111,6 +125,9 @@ const state = {
   elapsed: 0,
   collisionPulse: 0,
   collisionStrength: 0,
+  acceleration: 0,
+  cameraDistance: 0,
+  movementDebugTimer: 0,
   journeyStatus: "ready",
   passedCheckpoints: new Set(),
 };
@@ -118,9 +135,15 @@ let checkpointTimer = 0;
 
 const tuning = {
   maxForward: MAX_CART_SPEED,
-  acceleration: 1.65,
-  deceleration: 1.45,
+  acceleration: 1.45,
+  braking: 1.8,
+  speedResponse: 0.92,
+  accelerationResponse: 2.4,
+  brakingResponse: 3.1,
   steering: 0.52,
+  cameraDistance: 13.5,
+  cameraSpeedPullback: 2,
+  cameraHeight: 7.3,
 };
 
 camera.position.set(0, 8.5, -33);
@@ -159,6 +182,7 @@ function beginJourneyFinish() {
 function completeJourney() {
   if (state.journeyStatus === "reached") return;
   state.speed = 0;
+  state.acceleration = 0;
   state.journeyStatus = "reached";
   controls.resetAll();
   controls.setEnabled(false);
@@ -182,44 +206,58 @@ function updateJourneyProgress() {
 }
 
 function updateMovement(delta) {
-  const input = state.journeyStatus === "playing"
-    ? controls.getCombinedState()
-    : { left: false, right: false, targetSpeed: 0 };
+  const targetSpeed = state.journeyStatus === "playing"
+    ? controls.getTargetSpeed()
+    : 0;
+  const previousSpeed = state.speed;
   const oldX = cart.position.x;
   const oldZ = cart.position.z;
 
   if (state.journeyStatus === "reached") {
     state.speed = 0;
+    state.acceleration = 0;
   } else if (state.journeyStatus === "finishing") {
     state.speed = damp(state.speed, 0, 2.25, delta);
+    state.acceleration = damp(
+      state.acceleration,
+      (state.speed - previousSpeed) / Math.max(delta, 0.001),
+      5,
+      delta,
+    );
     if (Math.abs(state.speed) < 0.025) completeJourney();
   } else {
-    const targetSpeed = input.targetSpeed;
-    if (state.speed < targetSpeed) {
-      const pull =
-        0.62
-        + Math.min(Math.max(state.speed, 0) / tuning.maxForward, 1) * 0.38;
-      state.speed = Math.min(
-        targetSpeed,
-        state.speed + tuning.acceleration * pull * delta,
+    const speedError = targetSpeed - state.speed;
+    if (Math.abs(speedError) < 0.012 && Math.abs(state.acceleration) < 0.025) {
+      state.speed = targetSpeed;
+      state.acceleration = 0;
+    } else {
+      const desiredAcceleration = THREE.MathUtils.clamp(
+        speedError * tuning.speedResponse,
+        -tuning.braking,
+        tuning.acceleration,
       );
-    } else if (state.speed > targetSpeed) {
-      const slowingRate = targetSpeed === 0
-        ? tuning.deceleration
-        : tuning.deceleration * 0.82;
-      state.speed = Math.max(
-        targetSpeed,
-        state.speed - slowingRate * delta,
+      const response = speedError < 0
+        ? tuning.brakingResponse
+        : tuning.accelerationResponse;
+      state.acceleration = damp(
+        state.acceleration,
+        desiredAcceleration,
+        response,
+        delta,
       );
+      const nextSpeed = state.speed + state.acceleration * delta;
+      const crossedTarget =
+        (speedError > 0 && nextSpeed >= targetSpeed)
+        || (speedError < 0 && nextSpeed <= targetSpeed);
+      state.speed = crossedTarget ? targetSpeed : nextSpeed;
+      if (crossedTarget) state.acceleration = 0;
     }
   }
 
   state.speed = THREE.MathUtils.clamp(state.speed, -0.65, tuning.maxForward);
-  if (Math.abs(state.speed - input.targetSpeed) < 0.015) {
-    state.speed = input.targetSpeed;
-  }
-
-  const steerInput = (input.left ? 1 : 0) - (input.right ? 1 : 0);
+  const steerInput =
+    (controls.state.left ? 1 : 0)
+    - (controls.state.right ? 1 : 0);
   const speedRatio = Math.min(Math.abs(state.speed) / tuning.maxForward, 1);
   if (steerInput && Math.abs(state.speed) > 0.04) {
     const direction = state.speed >= 0 ? 1 : -1;
@@ -258,12 +296,15 @@ function updateMovement(delta) {
       state.collisionPulse = 0.3;
       state.collisionStrength = impact.severity;
       triggerCartBump(animationParts, impact.severity, impact.side);
-      audioManager.triggerBump(0.78 + impact.severity * 0.22);
+      audioManager.triggerBump(
+        0.78 + impact.severity * 0.22,
+        Math.min(Math.abs(state.speed) / tuning.maxForward, 1),
+      );
     }
   }
 
   updateJourneyProgress();
-  const roadSurface = roadGameplay.sampleSurface(cart.position);
+  roadGameplay.sampleSurface(cart.position, roadSurface);
   animateCart(
     animationParts,
     state.speed,
@@ -271,41 +312,87 @@ function updateMovement(delta) {
     state.elapsed,
     delta,
     roadSurface,
+    state.acceleration,
   );
   dustSystem.update({ cart, speed: state.speed, travelledDistance, delta });
-  audioManager.updateMovement({
-    speed: state.speed,
+  audioManager.updateMovement(
+    state.speed,
     delta,
-    steering: Math.abs(steerInput) * speedRatio,
-  });
+    Math.abs(steerInput) * speedRatio,
+    animationParts.gaitPlaybackRate,
+    roadSurface.roughness,
+  );
 }
 
 function updateCamera(delta) {
   headingVector.set(Math.sin(state.heading), 0, Math.cos(state.heading));
+  const movement = Math.min(Math.abs(state.speed) / tuning.maxForward, 1);
+  const chaseDistance =
+    tuning.cameraDistance + movement * tuning.cameraSpeedPullback;
+  const chaseHeight = tuning.cameraHeight + movement * 0.22;
   chasePosition.copy(cart.position)
-    .addScaledVector(headingVector, -13.5)
-    .add(new THREE.Vector3(0, 7.3, 0));
+    .addScaledVector(headingVector, -chaseDistance);
+  cameraOffset.set(0, chaseHeight, 0);
+  chasePosition.add(cameraOffset);
 
-  const side = new THREE.Vector3(headingVector.z, 0, -headingVector.x);
+  sideVector.set(headingVector.z, 0, -headingVector.x);
   const steer = (controls.state.left ? 1 : 0) - (controls.state.right ? 1 : 0);
-  chasePosition.addScaledVector(side, -steer * 0.7);
+  chasePosition.addScaledVector(sideVector, -steer * 0.7);
+
+  const surfaceShake =
+    movement
+    * (
+      Math.abs(animationParts.suspensionY) * 0.32
+      + animationParts.surfaceRoughness * 0.009
+    );
+  chasePosition.x += Math.sin(state.elapsed * 15.7) * surfaceShake;
+  chasePosition.y += Math.sin(state.elapsed * 18.3 + 0.7) * surfaceShake * 0.72;
 
   if (state.collisionPulse > 0) {
     state.collisionPulse = Math.max(0, state.collisionPulse - delta);
     const shake = state.collisionStrength * Math.min(state.collisionPulse / 0.3, 1);
-    chasePosition.x += (Math.random() - 0.5) * 0.28 * shake;
-    chasePosition.y += (Math.random() - 0.5) * 0.2 * shake;
+    chasePosition.x += Math.sin(state.elapsed * 34) * 0.14 * shake;
+    chasePosition.y += Math.sin(state.elapsed * 29 + 0.8) * 0.1 * shake;
   }
 
-  camera.position.lerp(chasePosition, 1 - Math.exp(-3.8 * delta));
-  lookTarget.copy(cart.position).addScaledVector(headingVector, 4.2);
-  lookTarget.y += 1.35;
+  camera.position.lerp(
+    chasePosition,
+    1 - Math.exp(-(3.55 - movement * 0.35) * delta),
+  );
+  lookTarget.copy(cart.position).addScaledVector(headingVector, 4.2 + movement * 0.8);
+  lookTarget.y += 1.35 + animationParts.suspensionY * 0.18;
   camera.lookAt(lookTarget);
+  state.cameraDistance = camera.position.distanceTo(cart.position);
 
   sun.position.x = cart.position.x - 42;
   sun.position.z = cart.position.z - 25;
   sun.target.position.copy(cart.position);
   scene.add(sun.target);
+}
+
+function updateMovementDebug(delta) {
+  state.movementDebugTimer -= delta;
+  if (state.movementDebugTimer > 0) return;
+  state.movementDebugTimer = 0.1;
+
+  movementDebug.speedLevel.textContent =
+    `${controls.speedLevel} · ${controls.getSpeedMode()}`;
+  movementDebug.targetSpeed.textContent =
+    `${(controls.getTargetSpeed() * 3.6).toFixed(1)} km/h`;
+  movementDebug.actualSpeed.textContent =
+    `${(Math.abs(state.speed) * 3.6).toFixed(1)} km/h`;
+  movementDebug.acceleration.textContent =
+    `${state.acceleration.toFixed(2)} m/s²`;
+  movementDebug.suspension.textContent =
+    `${(animationParts.suspensionY * 100).toFixed(1)} cm`;
+  movementDebug.cameraDistance.textContent =
+    `${state.cameraDistance.toFixed(1)} m`;
+  movementDebug.ropeTension.textContent =
+    `${Math.round(animationParts.ropeRein.ropeTension * 100)}%`;
+  movementDebug.reinTension.textContent =
+    `${Math.round(animationParts.ropeRein.reinTension * 100)}%`;
+  movementDebug.driverInput.textContent =
+    animationParts.ropeRein.driverInputState;
 }
 
 function updateHud() {
@@ -331,6 +418,8 @@ function updateHud() {
       cart: cart.position.toArray().map((value) => Number(value.toFixed(3))),
       camera: camera.position.toArray().map((value) => Number(value.toFixed(3))),
       heading: Number(state.heading.toFixed(3)),
+      acceleration: Number(state.acceleration.toFixed(3)),
+      cameraDistance: Number(state.cameraDistance.toFixed(3)),
       wheelRotation: Number(animationParts.wheels[0].rotation.x.toFixed(3)),
       bullLegs: animationParts.bulls.map((bull) =>
         bull.legs.map((leg) => Number(leg.root.rotation.x.toFixed(3)))
@@ -338,6 +427,9 @@ function updateHud() {
       suspensionY: Number(animationParts.sprungGroup.position.y.toFixed(3)),
       driverReaction: Number(animationParts.driverReaction.toFixed(3)),
       driverReinReaction: Number(animationParts.driverReinReaction.toFixed(3)),
+      ropeTension: Number(animationParts.ropeRein.ropeTension.toFixed(3)),
+      reinTension: Number(animationParts.ropeRein.reinTension.toFixed(3)),
+      driverInputAnimation: animationParts.ropeRein.driverInputState,
       dustParticles: dustSystem.getActiveCount(),
       audio: audioManager.getDebugState(),
       input: controls.getCombinedState(),
@@ -353,6 +445,7 @@ function animate() {
   if (state.started) updateMovement(delta);
   villageLife.update({ cartPosition: cart.position, elapsed: state.elapsed, delta });
   updateCamera(delta);
+  updateMovementDebug(delta);
   updateHud();
   renderer.render(scene, camera);
   previousPosition.copy(cart.position);
@@ -393,6 +486,9 @@ function replayGame() {
   state.elapsed = 0;
   state.collisionPulse = 0;
   state.collisionStrength = 0;
+  state.acceleration = 0;
+  state.cameraDistance = 0;
+  state.movementDebugTimer = 0;
   state.journeyStatus = "playing";
   state.passedCheckpoints.clear();
   cart.position.set(START_X, 0.05, START_Z);
@@ -400,6 +496,8 @@ function replayGame() {
   previousPosition.copy(cart.position);
   camera.position.set(0, 8.5, -33);
   camera.lookAt(0, 1.3, -14);
+  roadSurface.roughness = 0;
+  roadSurface.roll = 0;
   finishScreen.classList.add("is-hidden");
   checkpointMessage.classList.add("hidden");
   touchControls.classList.remove("hidden");

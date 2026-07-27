@@ -185,7 +185,7 @@ export function createRoadGameplay(scene) {
     return null;
   }
 
-  function sampleSurface(position) {
+  function sampleSurface(position, target = {}) {
     let roughness = 0.08;
     let roll = Math.sin(position.z * 0.18 + position.x * 0.31) * 0.12;
     for (const obstacle of obstacles) {
@@ -199,10 +199,9 @@ export function createRoadGameplay(scene) {
       roughness = Math.max(roughness, obstacle.roughness * influence);
       roll += THREE.MathUtils.clamp(dx / reach, -1, 1) * influence;
     }
-    return {
-      roughness: THREE.MathUtils.clamp(roughness, 0, 1),
-      roll: THREE.MathUtils.clamp(roll, -1, 1),
-    };
+    target.roughness = THREE.MathUtils.clamp(roughness, 0, 1);
+    target.roll = THREE.MathUtils.clamp(roll, -1, 1);
+    return target;
   }
 
   function reset() {

@@ -1,5 +1,11 @@
 import * as THREE from "three";
 import { MAX_CART_SPEED } from "./controls.js";
+import {
+  createRopeReinAnimation,
+  resetRopeReinAnimation,
+  triggerRopeReinInput,
+  updateRopeReinAnimation,
+} from "./rope-rein-animation.js";
 
 const mat = (color, roughness = 0.86) => new THREE.MeshStandardMaterial({ color, roughness });
 const WOOD = mat(0x6b351b);
@@ -124,6 +130,16 @@ function createBull(x, coat, accent, phaseOffset, animationParts) {
   headPivot.position.set(0, 1.88, 1.77);
   upperBody.add(headPivot);
 
+  const reinAnchor = new THREE.Object3D();
+  reinAnchor.name = "ReinAnchor";
+  reinAnchor.position.set(0, -0.13, 0.82);
+  headPivot.add(reinAnchor);
+
+  const ropeAnchor = new THREE.Object3D();
+  ropeAnchor.name = "TraceRopeAnchor";
+  ropeAnchor.position.set(x < 0 ? -0.66 : 0.66, 1.72, 0.66);
+  upperBody.add(ropeAnchor);
+
   const head = box(0.84, 0.7, 1, coat);
   head.position.z = 0.1;
   headPivot.add(head);
@@ -179,6 +195,8 @@ function createBull(x, coat, accent, phaseOffset, animationParts) {
     head: headPivot,
     legs,
     tail: tailPivot,
+    reinAnchor,
+    ropeAnchor,
     phaseOffset,
     legSwing: [0, 0, 0, 0],
     kneeBend: [0, 0, 0, 0],
@@ -260,8 +278,12 @@ function createDriver() {
     const fist = sphere(0.14, SKIN, 7, 5);
     fist.position.copy(localHand);
     arm.add(fist);
+    const handAnchor = new THREE.Object3D();
+    handAnchor.name = "ReinHandAnchor";
+    handAnchor.position.copy(localHand);
+    arm.add(handAnchor);
     driver.add(arm);
-    return arm;
+    return { arm, handAnchor };
   };
   const leftArm = createArm(leftShoulder, leftHand);
   const rightArm = createArm(rightShoulder, rightHand);
@@ -279,7 +301,11 @@ function createDriver() {
     driver.add(sandal);
   });
 
-  return { group: driver, arms: [leftArm, rightArm] };
+  return {
+    group: driver,
+    arms: [leftArm.arm, rightArm.arm],
+    handAnchors: [leftArm.handAnchor, rightArm.handAnchor],
+  };
 }
 
 function addCartBody(sprungGroup) {
@@ -337,8 +363,13 @@ export function createBullockCart() {
     bulls: [],
     gaitDistance: 0,
     walkBlend: 0,
+    movementBlend: 0,
+    gaitPlaybackRate: 0.68,
+    stepContact: false,
     suspensionY: 0,
     suspensionRoll: 0,
+    suspensionPitch: 0,
+    surfaceRoughness: 0,
     driverReaction: 0,
     driverReinReaction: 0,
     lastStepIndex: 0,
@@ -377,6 +408,7 @@ export function createBullockCart() {
   animationParts.sprungGroup = sprungGroup;
   animationParts.driver = driver;
   animationParts.driverArms = driverParts.arms;
+  animationParts.driverHandAnchors = driverParts.handAnchors;
 
   const harness = new THREE.Group();
   harness.name = "YokeAndPoles";
@@ -415,6 +447,15 @@ export function createBullockCart() {
   });
   group.add(harness);
 
+  animationParts.cartRopeAnchors = [-1, 1].map((side) => {
+    const anchor = new THREE.Object3D();
+    anchor.name = side < 0 ? "LeftCartRopeAnchor" : "RightCartRopeAnchor";
+    anchor.position.set(side * 1.54, 1.78, -0.58);
+    sprungGroup.add(anchor);
+    return anchor;
+  });
+  animationParts.ropeRein = createRopeReinAnimation(group, animationParts);
+
   group.traverse((object) => {
     if (object.isMesh) {
       object.castShadow = true;
@@ -432,12 +473,19 @@ export function animateCart(
   elapsed,
   delta,
   roadSurface = { roughness: 0, roll: 0 },
+  acceleration = 0,
 ) {
   parts.wheels.forEach((wheel) => {
     wheel.rotation.x += travelledDistance / 1.36;
   });
 
   parts.gaitDistance += Math.abs(travelledDistance);
+  const movement = Math.min(Math.abs(speed) / MAX_CART_SPEED, 1);
+  parts.movementBlend = THREE.MathUtils.lerp(
+    parts.movementBlend,
+    movement,
+    1 - Math.exp(-3.8 * delta),
+  );
   const targetWalk = Math.abs(speed) > 0.05 ? 1 : 0;
   parts.walkBlend = THREE.MathUtils.lerp(
     parts.walkBlend,
@@ -445,22 +493,35 @@ export function animateCart(
     1 - Math.exp(-(targetWalk ? 6 : 4) * delta),
   );
 
-  const movement = Math.min(Math.abs(speed) / MAX_CART_SPEED, 1);
+  const gaitStrength = 0.72 + parts.movementBlend * 0.28;
+  parts.gaitPlaybackRate = 0.68 + parts.movementBlend * 0.62;
   const gaitPhase = parts.gaitDistance * 3.35;
   const stepIndex = Math.floor(gaitPhase / Math.PI);
-  const stepContact = stepIndex !== parts.lastStepIndex && parts.walkBlend > 0.2;
+  parts.stepContact = stepIndex !== parts.lastStepIndex && parts.walkBlend > 0.2;
   parts.lastStepIndex = stepIndex;
 
   parts.bulls.forEach((bullData) => {
     const phase = gaitPhase + bullData.phaseOffset;
-    const breathing = Math.sin(elapsed * 1.55 + bullData.phaseOffset) * 0.014;
-    const stepLift = Math.abs(Math.sin(phase * 2)) * 0.045 * parts.walkBlend;
+    const breathingAmount = THREE.MathUtils.lerp(0.018, 0.01, parts.movementBlend);
+    const breathing = Math.sin(elapsed * 1.55 + bullData.phaseOffset) * breathingAmount;
+    const stepLift =
+      Math.abs(Math.sin(phase * 2))
+      * (0.032 + parts.movementBlend * 0.018)
+      * parts.walkBlend;
     bullData.upperBody.position.y = breathing + stepLift;
 
     bullData.legs.forEach((leg, index) => {
       const stride = Math.sin(phase + leg.diagonalPhase);
-      const targetSwing = stride * 0.46 * parts.walkBlend;
-      const targetKnee = Math.max(0, -stride) * 0.34 * parts.walkBlend;
+      const targetSwing =
+        stride
+        * (0.35 + parts.movementBlend * 0.14)
+        * gaitStrength
+        * parts.walkBlend;
+      const targetKnee =
+        Math.max(0, -stride)
+        * (0.25 + parts.movementBlend * 0.11)
+        * gaitStrength
+        * parts.walkBlend;
       bullData.legSwing[index] = THREE.MathUtils.lerp(
         bullData.legSwing[index],
         targetSwing,
@@ -477,7 +538,9 @@ export function animateCart(
 
     bullData.head.rotation.x =
       -0.08
-      + Math.sin(phase * 2 + 0.4) * 0.055 * parts.walkBlend
+      + Math.sin(phase * 2 + 0.4)
+        * (0.04 + parts.movementBlend * 0.025)
+        * parts.walkBlend
       + Math.sin(elapsed * 1.2 + bullData.phaseOffset) * 0.012;
 
     const tailAmount = 0.12 + movement * 0.2;
@@ -487,9 +550,18 @@ export function animateCart(
   });
 
   const roadRoughness = THREE.MathUtils.clamp(roadSurface.roughness ?? 0, 0, 1);
+  parts.surfaceRoughness = THREE.MathUtils.lerp(
+    parts.surfaceRoughness,
+    roadRoughness,
+    1 - Math.exp(-4.5 * delta),
+  );
   const roadRipple =
     Math.sin(parts.gaitDistance * 4.7 + 0.35)
     + Math.sin(parts.gaitDistance * 2.15 + 1.2) * 0.45;
+  const smoothUnevenness =
+    Math.sin(parts.gaitDistance * 1.37 + 2.4) * 0.55
+    + Math.sin(parts.gaitDistance * 2.83 + 0.9) * 0.3
+    + Math.sin(parts.gaitDistance * 5.19 + 1.8) * 0.15;
   let impactY = 0;
   let impactRoll = 0;
   if (parts.roadImpactStrength > 0.001) {
@@ -508,17 +580,23 @@ export function animateCart(
 
   const suspensionTargetY =
     movement * (
-      Math.sin(elapsed * (4.2 + movement * 2.4)) * 0.018
-      + Math.abs(Math.sin(gaitPhase * 0.72)) * 0.02
-      + roadRipple * roadRoughness * 0.018
+      Math.sin(elapsed * (3.8 + movement * 2.2)) * 0.012
+      + Math.sin(gaitPhase * 0.72) * 0.012
+      + roadRipple * parts.surfaceRoughness * 0.013
+      + smoothUnevenness * (0.006 + parts.surfaceRoughness * 0.01)
     )
     + impactY;
   const suspensionTargetRoll =
     movement * (
-      Math.sin(elapsed * 3.1 + 0.5) * 0.014
-      + (roadSurface.roll ?? 0) * roadRoughness * 0.016
+      Math.sin(elapsed * 2.7 + 0.5) * 0.01
+      + smoothUnevenness * 0.004
+      + (roadSurface.roll ?? 0) * parts.surfaceRoughness * 0.014
     )
     + impactRoll;
+  const accelerationLean = THREE.MathUtils.clamp(acceleration / 2.2, -1, 1);
+  const suspensionTargetPitch =
+    -accelerationLean * 0.022
+    + movement * smoothUnevenness * parts.surfaceRoughness * 0.004;
   parts.suspensionY = THREE.MathUtils.lerp(
     parts.suspensionY,
     suspensionTargetY,
@@ -529,7 +607,13 @@ export function animateCart(
     suspensionTargetRoll,
     1 - Math.exp(-5 * delta),
   );
+  parts.suspensionPitch = THREE.MathUtils.lerp(
+    parts.suspensionPitch,
+    suspensionTargetPitch,
+    1 - Math.exp(-4.6 * delta),
+  );
   parts.sprungGroup.position.y = parts.suspensionY;
+  parts.sprungGroup.rotation.x = parts.suspensionPitch;
   parts.sprungGroup.rotation.z = parts.suspensionRoll;
 
   parts.driverReaction = THREE.MathUtils.lerp(
@@ -542,23 +626,28 @@ export function animateCart(
     0,
     1 - Math.exp(-4.2 * delta),
   );
-  parts.driver.rotation.x = -parts.suspensionY * 0.65 + parts.driverReaction;
+  parts.driver.rotation.x =
+    -parts.suspensionY * 0.65
+    - parts.suspensionPitch * 0.45
+    + parts.driverReaction;
   parts.driver.rotation.z = -parts.suspensionRoll * 0.75;
   parts.driver.position.y = 1.88 + Math.sin(elapsed * 1.4) * 0.006;
-  parts.driverArms.forEach((arm, index) => {
-    arm.rotation.x = parts.driverReinReaction;
-    arm.rotation.z =
-      (index === 0 ? -1 : 1)
-      * Math.abs(parts.driverReinReaction)
-      * 0.12;
+  updateRopeReinAnimation(parts.ropeRein, {
+    speed,
+    maxSpeed: MAX_CART_SPEED,
+    acceleration,
+    elapsed,
+    delta,
+    suspensionY: parts.suspensionY,
+    suspensionRoll: parts.suspensionRoll,
+    suspensionPitch: parts.suspensionPitch,
   });
-
-  return { stepContact };
 }
 
-export function reactDriver(parts, command) {
+export function reactDriver(parts, command, source = "input") {
   parts.driverReaction = command === "forward" ? 0.065 : -0.045;
   parts.driverReinReaction = command === "forward" ? -0.055 : 0.085;
+  triggerRopeReinInput(parts.ropeRein, command, source);
 }
 
 export function triggerCartBump(parts, intensity = 1, side = 0) {
@@ -570,8 +659,13 @@ export function triggerCartBump(parts, intensity = 1, side = 0) {
 export function resetCartAnimation(parts) {
   parts.gaitDistance = 0;
   parts.walkBlend = 0;
+  parts.movementBlend = 0;
+  parts.gaitPlaybackRate = 0.68;
+  parts.stepContact = false;
   parts.suspensionY = 0;
   parts.suspensionRoll = 0;
+  parts.suspensionPitch = 0;
+  parts.surfaceRoughness = 0;
   parts.driverReaction = 0;
   parts.driverReinReaction = 0;
   parts.roadImpactStrength = 0;
@@ -592,8 +686,10 @@ export function resetCartAnimation(parts) {
     });
   });
   parts.sprungGroup.position.y = 0;
+  parts.sprungGroup.rotation.x = 0;
   parts.sprungGroup.rotation.z = 0;
   parts.driver.rotation.set(0, 0, 0);
   parts.driver.position.y = 1.88;
   parts.driverArms.forEach((arm) => arm.rotation.set(0, 0, 0));
+  resetRopeReinAnimation(parts.ropeRein);
 }

@@ -104,9 +104,13 @@ export class Controls {
   }
 
   decreaseSpeedLevel(source = "input") {
+    return this.stopSpeedLevel(source);
+  }
+
+  stopSpeedLevel(source = "input") {
     if (!this.enabled || this.speedLevel <= 0) return false;
     const previousLevel = this.speedLevel;
-    this.speedLevel -= 1;
+    this.speedLevel = 0;
     this.onSpeedLevelChange({
       direction: "brake",
       source,

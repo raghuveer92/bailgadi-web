@@ -115,6 +115,12 @@ const movementDebug = {
   cargoTurn: document.querySelector("#cargo-debug-turn"),
   cargoRoughness: document.querySelector("#cargo-debug-roughness"),
   cargoOffset: document.querySelector("#cargo-debug-offset"),
+  activeNPCs: document.querySelector("#world-debug-npcs"),
+  activeAnimals: document.querySelector("#world-debug-animals"),
+  spawnedObjects: document.querySelector("#world-debug-spawned"),
+  poolUsage: document.querySelector("#world-debug-pool"),
+  ambientEvent: document.querySelector("#world-debug-event"),
+  averageNPCUpdate: document.querySelector("#world-debug-update-time"),
 };
 
 const scene = new THREE.Scene();
@@ -146,6 +152,7 @@ const cargoPhysics = new CargoPhysicsManager(
 );
 
 const audioManager = new AudioManager(soundButton);
+villageLife.setAudioManager(audioManager);
 const controls = new Controls({
   root: document,
   onSpeedLevelChange: ({ direction, source }) => {
@@ -599,6 +606,14 @@ function updateMovementDebug(delta) {
     cargoPhysics.stability.roadRoughness.toFixed(2);
   movementDebug.cargoOffset.textContent =
     `${cargoPhysics.animation.offsetX.toFixed(2)}, ${cargoPhysics.animation.offsetY.toFixed(2)}`;
+  movementDebug.activeNPCs.textContent = String(villageLife.debug.activeNPCs);
+  movementDebug.activeAnimals.textContent = String(villageLife.debug.activeAnimals);
+  movementDebug.spawnedObjects.textContent = String(villageLife.debug.spawnedObjects);
+  movementDebug.poolUsage.textContent =
+    `${Math.round(villageLife.debug.poolUsage * 100)}%`;
+  movementDebug.ambientEvent.textContent = villageLife.debug.currentAmbientEvent;
+  movementDebug.averageNPCUpdate.textContent =
+    `${villageLife.debug.averageNPCUpdateTime.toFixed(2)} ms`;
 }
 
 function updateHud() {
@@ -674,7 +689,12 @@ function animate() {
   const delta = Math.min(clock.getDelta(), 0.05);
   state.elapsed += delta;
   if (state.started) updateMovement(delta);
-  villageLife.update({ cartPosition: cart.position, elapsed: state.elapsed, delta });
+  villageLife.update({
+    cartPosition: cart.position,
+    cartSpeed: state.speed,
+    elapsed: state.elapsed,
+    delta,
+  });
   updateCamera(delta);
   updateMovementDebug(delta);
   updateHud();

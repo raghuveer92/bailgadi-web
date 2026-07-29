@@ -62,6 +62,7 @@ export class AudioManager {
     this.cargoSource = null;
     this.cargoTimer = 2.8;
     this.cargoCueIndex = 0;
+    this.worldSource = null;
 
     this.button.addEventListener("click", () => this.setMuted(!this.muted));
     this.updateButton();
@@ -329,6 +330,75 @@ export class AudioManager {
     this.playOneShot("cargoFail");
   }
 
+  playWorldCue(name, lateralOffset = 0, distance = 0, volume = 0.3) {
+    if (
+      !this.context
+      || !this.masterGain
+      || !this.unlocked
+      || this.muted
+      || this.worldSource
+    ) {
+      return false;
+    }
+    const cues = {
+      cow: [112, 0.62, "sawtooth"],
+      buffalo: [76, 0.7, "sawtooth"],
+      chicken: [520, 0.18, "square"],
+      footsteps: [92, 0.1, "triangle"],
+      farmer: [185, 0.5, "square"],
+      dog: [245, 0.24, "square"],
+      bell: [680, 1.05, "sine"],
+      distantCart: [72, 0.78, "triangle"],
+      announcement: [210, 0.92, "square"],
+    };
+    const cue = cues[name];
+    if (!cue) return false;
+    const [frequency, duration, waveform] = cue;
+    const now = this.context.currentTime;
+    const oscillator = this.context.createOscillator();
+    const gain = this.context.createGain();
+    const panner = typeof this.context.createStereoPanner === "function"
+      ? this.context.createStereoPanner()
+      : null;
+    const attenuation = 1 / (1 + Math.max(0, distance) / 32);
+    const output = Math.min(0.34, volume * attenuation);
+    oscillator.type = waveform;
+    oscillator.frequency.setValueAtTime(frequency, now);
+    if (name === "cow" || name === "buffalo") {
+      oscillator.frequency.exponentialRampToValueAtTime(frequency * 0.68, now + duration);
+    } else if (name === "chicken" || name === "dog") {
+      oscillator.frequency.setValueAtTime(frequency * 1.22, now + duration * 0.46);
+      oscillator.frequency.setValueAtTime(frequency * 0.86, now + duration * 0.7);
+    } else if (name === "bell") {
+      oscillator.frequency.exponentialRampToValueAtTime(frequency * 0.985, now + duration);
+    } else if (name === "farmer" || name === "announcement") {
+      oscillator.frequency.setValueAtTime(frequency * 1.18, now + duration * 0.28);
+      oscillator.frequency.setValueAtTime(frequency * 0.9, now + duration * 0.58);
+      oscillator.frequency.setValueAtTime(frequency * 1.08, now + duration * 0.82);
+    }
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, output), now + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    oscillator.connect(gain);
+    if (panner) {
+      panner.pan.value = Math.max(-0.92, Math.min(0.92, lateralOffset / 30));
+      gain.connect(panner);
+      panner.connect(this.masterGain);
+    } else {
+      gain.connect(this.masterGain);
+    }
+    oscillator.start(now);
+    oscillator.stop(now + duration + 0.02);
+    this.worldSource = oscillator;
+    oscillator.onended = () => {
+      if (this.worldSource === oscillator) this.worldSource = null;
+      oscillator.disconnect();
+      gain.disconnect();
+      if (panner) panner.disconnect();
+    };
+    return true;
+  }
+
   updateMovement(speed, delta, steering, gaitPlaybackRate, roadRoughness) {
     const movement = Math.min(Math.abs(speed) / MAX_CART_SPEED, 1);
     this.movementAmount = movement;
@@ -367,6 +437,7 @@ export class AudioManager {
       loops,
       events: { ...this.events },
       cargoCueActive: Boolean(this.cargoSource),
+      worldCueActive: Boolean(this.worldSource),
     };
   }
 }

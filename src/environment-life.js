@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { DynamicWorldAI } from "./dynamic-world-ai.js";
 
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const SKIN = new THREE.MeshStandardMaterial({ color: 0x9b623d, roughness: 0.9 });
@@ -15,6 +16,8 @@ const CHICKEN_CREAM = new THREE.MeshStandardMaterial({ color: 0xd8b978, roughnes
 const CHICKEN_RED = new THREE.MeshStandardMaterial({ color: 0xb33e2f, roughness: 0.9 });
 const METAL = new THREE.MeshStandardMaterial({ color: 0x363b3b, roughness: 0.72 });
 const BIKE_SEAT = new THREE.MeshStandardMaterial({ color: 0x513522, roughness: 0.9 });
+const BASKET = new THREE.MeshStandardMaterial({ color: 0x9a6a35, roughness: 0.96 });
+const BROOM = new THREE.MeshStandardMaterial({ color: 0xb49250, roughness: 0.98 });
 const SMOKE = new THREE.ShaderMaterial({
   transparent: true,
   depthWrite: false,
@@ -72,6 +75,8 @@ const geometry = {
   femaleHair: new THREE.SphereGeometry(0.225, 7, 5, 0, Math.PI * 2, 0, Math.PI / 2),
   bikeWheel: new THREE.TorusGeometry(0.48, 0.035, 5, 14),
   bikeTube: new THREE.CylinderGeometry(0.035, 0.035, 1, 6),
+  basket: new THREE.CylinderGeometry(0.2, 0.28, 0.32, 8),
+  broom: new THREE.CylinderGeometry(0.035, 0.055, 1.35, 6),
 };
 
 function mesh(shape, material, castShadow = true) {
@@ -158,6 +163,14 @@ function createVillager(kind, clothing, phase) {
   const leftLeg = createLimb(limbShape, skin, -legX, hipY, 0);
   const rightLeg = createLimb(limbShape, skin, legX, hipY, 0);
   body.add(leftArm, rightArm, leftLeg, rightLeg);
+  const basket = mesh(geometry.basket, BASKET);
+  basket.position.set(0.45, isChild ? 0.72 : 0.9, 0.08);
+  basket.visible = false;
+  const broom = mesh(geometry.broom, BROOM);
+  broom.position.set(0.4, 0.62, 0.18);
+  broom.rotation.z = -0.32;
+  broom.visible = false;
+  body.add(basket, broom);
   body.scale.setScalar(heightScale);
 
   return {
@@ -168,6 +181,8 @@ function createVillager(kind, clothing, phase) {
     rightArm,
     leftLeg,
     rightLeg,
+    basket,
+    broom,
     kind,
     phase,
     home: new THREE.Vector3(),
@@ -206,11 +221,13 @@ function createLargeAnimal(kind, phase) {
   });
   root.add(headPivot);
 
+  const legs = [];
   [-0.38, 0.38].forEach((x) => {
     [-0.58, 0.62].forEach((z) => {
       const leg = mesh(geometry.cowLeg, kind === "buffalo" ? BUFFALO_HIDE : COW_HIDE);
       leg.position.set(x, 0.46, z);
       root.add(leg);
+      legs.push(leg);
     });
   });
 
@@ -227,6 +244,8 @@ function createLargeAnimal(kind, phase) {
     tail: tailPivot,
     phase,
     kind,
+    legs,
+    home: new THREE.Vector3(),
     homeRotation: 0,
   };
 }
@@ -241,15 +260,18 @@ function createChicken(material, phase) {
   const comb = mesh(new THREE.ConeGeometry(0.07, 0.16, 4), CHICKEN_RED);
   comb.position.set(0, 0.82, 0.2);
   root.add(body, head, comb);
+  const legs = [];
   [-0.08, 0.08].forEach((x) => {
     const leg = mesh(geometry.chickenLeg, CHICKEN_BROWN);
     leg.position.set(x, 0.14, 0);
     root.add(leg);
+    legs.push(leg);
   });
   return {
     root,
     head,
     phase,
+    legs,
     home: new THREE.Vector3(),
     radius: 0.9 + (phase % 1) * 0.7,
   };
@@ -334,6 +356,7 @@ function placeAnimals(scene, random) {
   return placements.map(([kind, x, z]) => {
     const animal = createLargeAnimal(kind, random() * Math.PI * 2);
     animal.root.position.set(x + (random() - 0.5) * 3, 0, z + (random() - 0.5) * 4);
+    animal.home.copy(animal.root.position);
     animal.homeRotation = random() * Math.PI * 2;
     animal.root.rotation.y = animal.homeRotation;
     scene.add(animal.root);
@@ -401,182 +424,32 @@ export function createVillageLife(scene, { random, windTargets = [] }) {
   const chickens = placeChickens(scene, random);
   const bicycles = placeBicycles(scene, random);
   const smokeSources = placeSmoke(scene, random);
-  const crossingVillager = createVillager("male", CLOTHING[1], random() * Math.PI * 2);
-  crossingVillager.root.visible = false;
-  scene.add(crossingVillager.root);
-  const crossing = {
-    villager: crossingVillager,
-    active: false,
-    direction: 1,
-    timer: 24 + random() * 18,
-  };
+  const worldAI = new DynamicWorldAI({
+    scene,
+    villagers,
+    animals,
+    chickens,
+    random,
+    windTargets,
+    smokeSources,
+  });
 
-  function updateVillager(villager, cartPosition, elapsed, delta) {
-    if (!villager.root.visible) return;
-    const distanceSquared = squaredDistanceXZ(villager.root.position, cartPosition);
-    if (distanceSquared > 180 * 180) return;
-    const idle = Math.sin(elapsed * 1.4 + villager.phase);
-    villager.body.position.y = idle * 0.012;
-    villager.body.rotation.z = idle * 0.006;
-
-    let walking = 0;
-    if (villager.behavior === "walk") {
-      const progress = Math.sin(elapsed * 0.42 + villager.phase);
-      villager.root.position.copy(villager.home).addScaledVector(
-        villager.walkAxis,
-        progress * villager.walkRange,
-      );
-      const velocity = Math.cos(elapsed * 0.42 + villager.phase);
-      villager.root.rotation.y = villager.baseRotation + (velocity < 0 ? Math.PI : 0);
-      walking = 0.42;
-    }
-
-    const near = distanceSquared < (villager.kind === "child" ? 18 * 18 : 15 * 15);
-    if (near) {
-      turnToward(villager.root, cartPosition, delta, 0.9);
-      villager.head.rotation.y = Math.sin(elapsed * 0.8 + villager.phase) * 0.08;
-      if (villager.kind === "child") {
-        const roadSide = Math.sign(villager.home.x) || 1;
-        const safeX = villager.home.x + roadSide * 0.75;
-        villager.root.position.x = THREE.MathUtils.lerp(
-          villager.root.position.x,
-          safeX,
-          1 - Math.exp(-1.8 * delta),
-        );
-        villager.rightArm.rotation.z = -2.4 + Math.sin(elapsed * 7 + villager.phase) * 0.42;
-        villager.rightArm.rotation.x = -0.32;
-      }
-    } else if (villager.behavior !== "walk") {
-      villager.root.rotation.y += Math.atan2(
-        Math.sin(villager.baseRotation - villager.root.rotation.y),
-        Math.cos(villager.baseRotation - villager.root.rotation.y),
-      ) * (1 - Math.exp(-1.2 * delta));
-    }
-
-    if (!(near && villager.kind === "child")) {
-      villager.rightArm.rotation.z = 0;
-      villager.rightArm.rotation.x = Math.sin(elapsed * 3.2 + villager.phase) * walking;
-    }
-    villager.leftArm.rotation.x = -Math.sin(elapsed * 3.2 + villager.phase) * walking;
-    villager.leftLeg.rotation.x = Math.sin(elapsed * 3.2 + villager.phase) * walking;
-    villager.rightLeg.rotation.x = -Math.sin(elapsed * 3.2 + villager.phase) * walking;
-    if (villager.behavior === "look" && !near) {
-      villager.head.rotation.y = Math.sin(elapsed * 0.35 + villager.phase) * 0.18;
-    }
-  }
-
-  function updateAnimals(cartPosition, elapsed, delta) {
-    animals.forEach((animal) => {
-      const distanceSquared = squaredDistanceXZ(animal.root.position, cartPosition);
-      if (distanceSquared > 190 * 190) return;
-      const near = distanceSquared < 20 * 20;
-      const grazing = Math.sin(elapsed * 0.42 + animal.phase);
-      animal.head.rotation.x = 0.2 + (grazing * 0.5 + 0.5) * 0.42;
-      animal.head.rotation.y = Math.sin(elapsed * 0.55 + animal.phase) * 0.12;
-      animal.tail.rotation.z = Math.sin(elapsed * 1.3 + animal.phase) * 0.3;
-      if (near) {
-        animal.head.rotation.x *= 0.35;
-        turnToward(animal.root, cartPosition, delta, 0.45);
-      } else {
-        animal.root.rotation.y += Math.atan2(
-          Math.sin(animal.homeRotation - animal.root.rotation.y),
-          Math.cos(animal.homeRotation - animal.root.rotation.y),
-        ) * (1 - Math.exp(-0.55 * delta));
-      }
-    });
-  }
-
-  function updateChickens(cartPosition, elapsed) {
-    chickens.forEach((chicken) => {
-      if (squaredDistanceXZ(chicken.home, cartPosition) > 120 * 120) return;
-      const angle = elapsed * (0.18 + (chicken.phase % 1) * 0.08) + chicken.phase;
-      chicken.root.position.x = chicken.home.x + Math.sin(angle) * chicken.radius;
-      chicken.root.position.z = chicken.home.z + Math.cos(angle * 0.83) * chicken.radius;
-      chicken.root.rotation.y = Math.atan2(Math.cos(angle), -Math.sin(angle * 0.83));
-      chicken.head.position.y = 0.66 + Math.max(0, Math.sin(elapsed * 4.5 + chicken.phase)) * 0.045;
-    });
-  }
-
-  function updateSmoke(elapsed, delta) {
-    smokeSources.forEach((source) => {
-      source.particles.forEach((particle, index) => {
-        particle.life = (particle.life + delta * 0.09) % 1;
-        const height = particle.life * 4;
-        const positionIndex = index * 3;
-        source.positions[positionIndex] =
-          Math.sin(elapsed * 0.25 + source.phase + particle.life * 3) * 0.24
-          + particle.offset;
-        source.positions[positionIndex + 1] = height;
-        source.positions[positionIndex + 2] =
-          particle.life * 0.55 + Math.cos(elapsed * 0.2 + index) * 0.08;
-        const strength = Math.sin(particle.life * Math.PI) * 0.72;
-        source.alphas[index] = strength;
-      });
-      source.smoke.geometry.attributes.position.needsUpdate = true;
-      source.smoke.geometry.attributes.alpha.needsUpdate = true;
-    });
-  }
-
-  function updateWind(cartPosition, elapsed) {
-    windTargets.forEach((target) => {
-      const dx = target.worldX - cartPosition.x;
-      const dz = target.worldZ - cartPosition.z;
-      if (dx * dx + dz * dz > target.range * target.range) return;
-      const sway = Math.sin(elapsed * target.speed + target.phase);
-      target.object.rotation.z = target.baseZ + sway * target.amount;
-      target.object.rotation.x = target.baseX + Math.cos(elapsed * target.speed * 0.7 + target.phase) * target.amount * 0.35;
-    });
-  }
-
-  function updateCrossing(cartPosition, elapsed, delta) {
-    if (!crossing.active) {
-      crossing.timer -= delta;
-      if (crossing.timer > 0 || cartPosition.z > 330) return;
-      crossing.active = true;
-      crossing.direction = random() > 0.5 ? 1 : -1;
-      crossing.villager.root.visible = true;
-      crossing.villager.root.position.set(
-        -crossing.direction * 12.5,
-        0,
-        cartPosition.z + 115 + random() * 20,
-      );
-      crossing.villager.root.rotation.y = crossing.direction > 0 ? Math.PI / 2 : -Math.PI / 2;
-    }
-
-    const villager = crossing.villager;
-    const ahead = villager.root.position.z - cartPosition.z;
-    const crossingSpeed = ahead < 30 ? 1.9 : 1.05;
-    villager.root.position.x += crossing.direction * crossingSpeed * delta;
-    const stride = Math.sin(elapsed * 4.2 + villager.phase);
-    villager.leftArm.rotation.x = -stride * 0.4;
-    villager.rightArm.rotation.x = stride * 0.4;
-    villager.leftLeg.rotation.x = stride * 0.42;
-    villager.rightLeg.rotation.x = -stride * 0.42;
-    villager.body.position.y = Math.abs(stride) * 0.018;
-    if (
-      Math.abs(villager.root.position.x) > 13.5
-      || ahead < -12
-      || villager.root.position.z > 475
-    ) {
-      villager.root.visible = false;
-      crossing.active = false;
-      crossing.timer = 30 + random() * 24;
-    }
-  }
-
-  function update({ cartPosition, elapsed, delta }) {
-    villagers.forEach((villager) => updateVillager(villager, cartPosition, elapsed, delta));
-    updateAnimals(cartPosition, elapsed, delta);
-    updateChickens(cartPosition, elapsed);
-    updateSmoke(elapsed, delta);
-    updateWind(cartPosition, elapsed);
-    updateCrossing(cartPosition, elapsed, delta);
+  function update({ cartPosition, cartSpeed = 0, elapsed, delta }) {
+    worldAI.update(cartPosition, cartSpeed, elapsed, delta);
   }
 
   return {
     update,
+    setAudioManager: (audioManager) => worldAI.setAudioManager(audioManager),
+    debug: worldAI.debug,
+    managers: {
+      npc: worldAI.npcManager,
+      animals: worldAI.animalManager,
+      ambientEvents: worldAI.ambientEvents,
+      spawn: worldAI.spawnManager,
+    },
     counts: {
-      villagers: villagers.length + 1,
+      villagers: villagers.length,
       animals: animals.length,
       chickens: chickens.length,
       bicycles: bicycles.length,

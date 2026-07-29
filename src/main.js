@@ -218,6 +218,7 @@ const {
   sun,
   villageLife,
   worldGenerator,
+  getRoutePosition,
   sampleRoad,
 } = createWorld(scene);
 const roadGameplay = createRoadGameplay(scene);
@@ -284,6 +285,19 @@ const behindRoadSample = {};
 const aheadRoadPosition = { x: 0, z: 0 };
 const behindRoadPosition = { x: 0, z: 0 };
 const candidateRoadPosition = { x: 0, z: 0 };
+const routeState = {
+  currentRouteDistance: 0,
+  startRouteDistance: 0,
+  targetRouteDistance: 0,
+  requiredRouteDistance: MISSIONS[0].distance,
+  travelledRouteDistance: 0,
+  remainingRouteDistance: MISSIONS[0].distance,
+  missionProgressRatio: 0,
+  nextCheckpointRouteDistance: 0,
+  completionEligible: false,
+  chunkIndex: 0,
+  localDistance: 0,
+};
 const roadState = {
   zone: ROAD_ZONE_CENTER,
   lateralOffset: 0,
@@ -399,7 +413,7 @@ function missionStartZ() {
 }
 
 function updateCurrentRoadSample() {
-  sampleRoad(cart.position, state.mission.level, currentRoadSample);
+  getRoutePosition(cart.position, state.mission.level, currentRoadSample);
   state.roadHeading = Math.atan2(
     currentRoadSample.tangentX,
     currentRoadSample.tangentZ,
@@ -461,6 +475,36 @@ function initializeRoadPose() {
   updateTerrainPose(0, true);
   updateRoadState(0, true);
   updateSurfaceState(0, true);
+}
+
+function updateNextCheckpointRouteDistance() {
+  routeState.nextCheckpointRouteDistance = routeState.targetRouteDistance;
+  for (let index = 0; index < CHECKPOINTS.length; index += 1) {
+    const checkpoint = CHECKPOINTS[index];
+    if (!state.passedCheckpoints.has(checkpoint)) {
+      routeState.nextCheckpointRouteDistance = (
+        routeState.targetRouteDistance - checkpoint
+      );
+      return;
+    }
+  }
+}
+
+function initializeMissionRoute() {
+  routeState.currentRouteDistance = currentRoadSample.routeDistance;
+  routeState.startRouteDistance = currentRoadSample.routeDistance;
+  routeState.requiredRouteDistance = state.mission.distance;
+  routeState.targetRouteDistance = (
+    routeState.startRouteDistance + routeState.requiredRouteDistance
+  );
+  routeState.travelledRouteDistance = 0;
+  routeState.remainingRouteDistance = routeState.requiredRouteDistance;
+  routeState.missionProgressRatio = 0;
+  routeState.completionEligible = false;
+  routeState.chunkIndex = currentRoadSample.chunkIndex;
+  routeState.localDistance = currentRoadSample.localDistance;
+  state.progress = 0;
+  updateNextCheckpointRouteDistance();
 }
 
 function updateRoadState(delta, resetTransitions = false) {
@@ -611,7 +655,10 @@ function showCheckpoint(remaining) {
 
 function beginJourneyFinish() {
   if (state.journeyStatus !== "playing") return;
-  state.progress = state.mission.distance;
+  state.progress = routeState.requiredRouteDistance;
+  routeState.remainingRouteDistance = 0;
+  routeState.missionProgressRatio = 1;
+  routeState.completionEligible = true;
   state.journeyStatus = "finishing";
   controls.resetAll();
   controls.setEnabled(false);
@@ -667,19 +714,44 @@ function failCargoMission() {
 
 function updateJourneyProgress() {
   if (state.journeyStatus !== "playing") return;
-  state.progress = THREE.MathUtils.clamp(
-    cart.position.z - missionStartZ(),
+  routeState.currentRouteDistance = currentRoadSample.routeDistance;
+  routeState.travelledRouteDistance = Math.max(
     0,
-    state.mission.distance,
+    routeState.currentRouteDistance - routeState.startRouteDistance,
   );
-  const remaining = Math.max(0, state.mission.distance - state.progress);
-  CHECKPOINTS.forEach((checkpoint) => {
-    if (remaining <= checkpoint && !state.passedCheckpoints.has(checkpoint)) {
+  routeState.remainingRouteDistance = Math.max(
+    0,
+    routeState.targetRouteDistance - routeState.currentRouteDistance,
+  );
+  routeState.missionProgressRatio = THREE.MathUtils.clamp(
+    routeState.travelledRouteDistance / routeState.requiredRouteDistance,
+    0,
+    1,
+  );
+  routeState.completionEligible = (
+    routeState.currentRouteDistance >= routeState.targetRouteDistance
+  );
+  routeState.chunkIndex = currentRoadSample.chunkIndex;
+  routeState.localDistance = currentRoadSample.localDistance;
+  state.progress = Math.min(
+    routeState.travelledRouteDistance,
+    routeState.requiredRouteDistance,
+  );
+  for (let index = 0; index < CHECKPOINTS.length; index += 1) {
+    const checkpoint = CHECKPOINTS[index];
+    const checkpointRouteDistance = (
+      routeState.targetRouteDistance - checkpoint
+    );
+    if (
+      routeState.currentRouteDistance >= checkpointRouteDistance
+      && !state.passedCheckpoints.has(checkpoint)
+    ) {
       state.passedCheckpoints.add(checkpoint);
       showCheckpoint(checkpoint);
     }
-  });
-  if (remaining <= 0) beginJourneyFinish();
+  }
+  updateNextCheckpointRouteDistance();
+  if (routeState.completionEligible) beginJourneyFinish();
 }
 
 function updateMovement(delta) {
@@ -1061,10 +1133,11 @@ function updateMovementDebug(delta) {
 }
 
 function updateHud() {
-  const remaining = Math.max(0, state.mission.distance - state.progress);
-  distanceLabel.textContent = state.distance < 1000
-    ? `${Math.floor(state.distance)} m`
-    : `${(state.distance / 1000).toFixed(2)} km`;
+  const remaining = routeState.remainingRouteDistance;
+  const travelled = routeState.travelledRouteDistance;
+  distanceLabel.textContent = travelled < 1000
+    ? `${Math.floor(travelled)} m`
+    : `${(travelled / 1000).toFixed(2)} km`;
   remainingDistanceLabel.textContent = `${Math.ceil(remaining)} m`;
   objectiveLabel.textContent = state.journeyStatus === "reached"
     ? "Village reached"
@@ -1072,7 +1145,8 @@ function updateHud() {
   const progressBucket = Math.floor(state.progress * 2);
   if (progressBucket !== state.hudProgressBucket) {
     state.hudProgressBucket = progressBucket;
-    journeyProgressFill.style.transform = `scaleX(${state.progress / state.mission.distance})`;
+    journeyProgressFill.style.transform =
+      `scaleX(${routeState.missionProgressRatio})`;
   }
   missionNameLabel.textContent = state.mission.name;
   missionRewardLabel.textContent = `${state.mission.reward} Coins`;
@@ -1163,6 +1237,28 @@ function updateHud() {
         dustFactor: Number(surfaceState.dustFactor.toFixed(3)),
         vibration: Number(surfaceState.vibration.toFixed(3)),
       },
+      routeMission: {
+        currentRouteDistance: Number(
+          routeState.currentRouteDistance.toFixed(3),
+        ),
+        startRouteDistance: Number(routeState.startRouteDistance.toFixed(3)),
+        targetRouteDistance: Number(routeState.targetRouteDistance.toFixed(3)),
+        travelledRouteDistance: Number(
+          routeState.travelledRouteDistance.toFixed(3),
+        ),
+        remainingRouteDistance: Number(
+          routeState.remainingRouteDistance.toFixed(3),
+        ),
+        missionProgressRatio: Number(
+          routeState.missionProgressRatio.toFixed(5),
+        ),
+        nextCheckpointRouteDistance: Number(
+          routeState.nextCheckpointRouteDistance.toFixed(3),
+        ),
+        completionEligible: routeState.completionEligible,
+        chunkIndex: routeState.chunkIndex,
+        localDistance: Number(routeState.localDistance.toFixed(3)),
+      },
     });
   }
 }
@@ -1196,6 +1292,7 @@ function animate() {
 
 function startGame() {
   initializeRoadPose();
+  initializeMissionRoute();
   state.started = true;
   state.journeyStatus = "playing";
   cargoPhysics.reset(state.mission.cargoType, state.mission.level);
@@ -1246,6 +1343,17 @@ function replayGame() {
   state.terrainPitch = 0;
   state.journeyStatus = "playing";
   state.passedCheckpoints.clear();
+  routeState.currentRouteDistance = 0;
+  routeState.startRouteDistance = 0;
+  routeState.targetRouteDistance = 0;
+  routeState.requiredRouteDistance = state.mission.distance;
+  routeState.travelledRouteDistance = 0;
+  routeState.remainingRouteDistance = state.mission.distance;
+  routeState.missionProgressRatio = 0;
+  routeState.nextCheckpointRouteDistance = 0;
+  routeState.completionEligible = false;
+  routeState.chunkIndex = 0;
+  routeState.localDistance = 0;
   cart.position.set(START_X, 0.05, missionStartZ());
   cart.rotation.set(0, 0, 0);
   worldGenerator.reseed();
@@ -1257,6 +1365,7 @@ function replayGame() {
     renderer.info.render.calls,
   );
   initializeRoadPose();
+  initializeMissionRoute();
   previousPosition.copy(cart.position);
   camera.position.set(0, tuning.cameraHeight + 0.8, missionStartZ() - tuning.cameraDistance);
   camera.lookAt(0, 1.4, missionStartZ() + 4.4);
@@ -1286,7 +1395,7 @@ window.__bailgadi = {
     started: state.started,
     speed: state.speed,
     distance: state.distance,
-    remaining: Math.max(0, state.mission.distance - state.progress),
+    remaining: routeState.remainingRouteDistance,
     journeyStatus: state.journeyStatus,
     mission: state.mission.name,
     cargoType: state.mission.cargoType,
@@ -1334,6 +1443,21 @@ window.__bailgadi = {
         rollingResistance: surfaceState.rollingResistance,
         dustFactor: surfaceState.dustFactor,
         vibration: surfaceState.vibration,
+      }
+      : undefined,
+    routeMission: import.meta.env.DEV
+      ? {
+        currentRouteDistance: routeState.currentRouteDistance,
+        startRouteDistance: routeState.startRouteDistance,
+        targetRouteDistance: routeState.targetRouteDistance,
+        requiredRouteDistance: routeState.requiredRouteDistance,
+        travelledRouteDistance: routeState.travelledRouteDistance,
+        remainingRouteDistance: routeState.remainingRouteDistance,
+        missionProgressRatio: routeState.missionProgressRatio,
+        nextCheckpointRouteDistance: routeState.nextCheckpointRouteDistance,
+        completionEligible: routeState.completionEligible,
+        chunkIndex: routeState.chunkIndex,
+        localDistance: routeState.localDistance,
       }
       : undefined,
   }),

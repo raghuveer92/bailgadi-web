@@ -1,21 +1,13 @@
 import * as THREE from "three";
-
-const ROAD_OBSTACLES = [
-  { type: "patch", x: -2.8, z: 14, rotation: 0.12 },
-  { type: "rock", x: 3.9, z: 43, rotation: 0.4 },
-  { type: "pothole", x: -3.5, z: 73, rotation: -0.18 },
-  { type: "log", x: 2.7, z: 108, rotation: 0.24 },
-  { type: "patch", x: 3.4, z: 141, rotation: -0.2 },
-  { type: "rock", x: -4.2, z: 174, rotation: 0.7 },
-  { type: "pothole", x: 2.2, z: 208, rotation: 0.16 },
-  { type: "log", x: -3.5, z: 247, rotation: -0.3 },
-  { type: "patch", x: -1.4, z: 282, rotation: 0.22 },
-  { type: "rock", x: 4.1, z: 320, rotation: 0.15 },
-  { type: "pothole", x: -3.8, z: 357, rotation: -0.24 },
-  { type: "log", x: 3.3, z: 397, rotation: 0.28 },
-  { type: "patch", x: -3.1, z: 433, rotation: -0.12 },
-  { type: "rock", x: 2.8, z: 462, rotation: 0.55 },
-];
+import {
+  HAZARD_BROKEN_CART_WHEEL,
+  HAZARD_FALLEN_BRANCH,
+  HAZARD_HAY_BUNDLE,
+  HAZARD_POTHOLE,
+  HAZARD_ROCK,
+  HAZARD_WOODEN_LOG,
+  MAX_ROUTE_HAZARDS,
+} from "./procedural-world.js";
 
 const material = (color, roughness = 0.92) =>
   new THREE.MeshStandardMaterial({ color, roughness });
@@ -26,6 +18,10 @@ const WOOD_END = material(0x9b6b38);
 const POTHOLE = material(0x765033);
 const PATCH = material(0xa97343);
 const PATCH_LIGHT = material(0xc08b54);
+const WHEEL = material(0x4b3423);
+const WHEEL_HUB = material(0x75502c);
+const HAY = material(0xc9a84e);
+const HAY_TIE = material(0x75502c);
 const DESTINATION_WOOD = material(0x714526);
 const DESTINATION_CLOTH = material(0xd7a83d);
 const DESTINATION_PLASTER = material(0xd9b271);
@@ -106,11 +102,89 @@ function createPatch() {
 }
 
 function createObstacle(type) {
-  if (type === "rock") return createRock();
-  if (type === "pothole") return createPothole();
-  if (type === "log") return createLog();
+  if (type === HAZARD_ROCK) return createRock();
+  if (type === HAZARD_POTHOLE) return createPothole();
+  if (
+    type === HAZARD_WOODEN_LOG
+    || type === HAZARD_FALLEN_BRANCH
+  ) {
+    const obstacle = createLog();
+    if (type === HAZARD_FALLEN_BRANCH) {
+      obstacle.group.scale.set(0.84, 0.72, 1.2);
+      obstacle.radius = 0.68;
+      obstacle.severity = 0.68;
+      obstacle.roughness = 0.78;
+    }
+    return obstacle;
+  }
+  if (type === HAZARD_BROKEN_CART_WHEEL) {
+    const group = new THREE.Group();
+    const rim = prepareMesh(new THREE.Mesh(
+      new THREE.TorusGeometry(0.52, 0.075, 6, 14),
+      WHEEL,
+    ));
+    rim.rotation.y = Math.PI / 2;
+    rim.position.y = 0.16;
+    group.add(rim);
+    const hub = prepareMesh(new THREE.Mesh(
+      new THREE.CylinderGeometry(0.13, 0.13, 0.24, 8),
+      WHEEL_HUB,
+    ));
+    hub.rotation.z = Math.PI / 2;
+    hub.position.y = 0.16;
+    group.add(hub);
+    for (let index = 0; index < 8; index += 1) {
+      const spoke = prepareMesh(new THREE.Mesh(
+        new THREE.BoxGeometry(0.035, 0.035, 0.92),
+        WHEEL,
+      ));
+      spoke.rotation.x = (index / 8) * Math.PI * 2;
+      spoke.rotation.y = Math.PI / 2;
+      spoke.position.y = 0.16;
+      group.add(spoke);
+    }
+    return {
+      group,
+      radius: 0.62,
+      severity: 0.7,
+      roughness: 0.72,
+    };
+  }
+  if (type === HAZARD_HAY_BUNDLE) {
+    const group = new THREE.Group();
+    const bale = prepareMesh(new THREE.Mesh(
+      new THREE.BoxGeometry(1.25, 0.72, 0.82),
+      HAY,
+    ));
+    bale.position.y = 0.37;
+    bale.rotation.y = 0.08;
+    group.add(bale);
+    for (let side = -1; side <= 1; side += 2) {
+      const tie = prepareMesh(new THREE.Mesh(
+        new THREE.BoxGeometry(0.07, 0.75, 0.86),
+        HAY_TIE,
+      ));
+      tie.position.set(side * 0.36, 0.38, 0);
+      group.add(tie);
+    }
+    return {
+      group,
+      radius: 0.7,
+      severity: 0.48,
+      roughness: 0.58,
+    };
+  }
   return createPatch();
 }
+
+const HAZARD_TYPES = [
+  HAZARD_ROCK,
+  HAZARD_FALLEN_BRANCH,
+  HAZARD_WOODEN_LOG,
+  HAZARD_POTHOLE,
+  HAZARD_BROKEN_CART_WHEEL,
+  HAZARD_HAY_BUNDLE,
+];
 
 function createDestinationMarker() {
   const marker = new THREE.Group();
@@ -215,6 +289,8 @@ function createCheckpointMarker(index) {
 export function createRoadGameplay(scene) {
   const group = new THREE.Group();
   group.name = "RoadGameplay";
+  const hazardGroup = new THREE.Group();
+  hazardGroup.name = "ProceduralRouteHazards";
   const missionGroup = new THREE.Group();
   missionGroup.name = "MissionRouteMarkers";
   const destinationMarker = createDestinationMarker();
@@ -228,21 +304,124 @@ export function createRoadGameplay(scene) {
   for (let index = 0; index < checkpointMarkers.length; index += 1) {
     missionGroup.add(checkpointMarkers[index]);
   }
-  group.add(missionGroup);
+  group.add(missionGroup, hazardGroup);
 
-  const obstacles = ROAD_OBSTACLES.map((placement, index) => {
-    const created = createObstacle(placement.type);
-    created.group.position.set(placement.x, 0, placement.z);
-    created.group.rotation.y = placement.rotation;
-    group.add(created.group);
-    return {
-      ...placement,
-      ...created,
-      id: index,
+  const obstacles = new Array(MAX_ROUTE_HAZARDS);
+  for (let index = 0; index < MAX_ROUTE_HAZARDS; index += 1) {
+    const obstacleRoot = new THREE.Group();
+    obstacleRoot.name = `RouteHazard${index + 1}`;
+    obstacleRoot.visible = false;
+    const variants = new Array(HAZARD_TYPES.length);
+    for (
+      let typeIndex = 0;
+      typeIndex < HAZARD_TYPES.length;
+      typeIndex += 1
+    ) {
+      const created = createObstacle(HAZARD_TYPES[typeIndex]);
+      created.group.visible = false;
+      obstacleRoot.add(created.group);
+      variants[typeIndex] = created;
+    }
+    hazardGroup.add(obstacleRoot);
+    obstacles[index] = {
+      id: 0,
+      routeDistance: 0,
+      laneOffset: 0,
+      lane: "centre",
+      type: HAZARD_ROCK,
+      size: 1,
+      difficulty: 1,
+      chunkIndex: 0,
+      theme: "None",
+      active: false,
+      x: 10000,
+      z: 10000,
+      radius: 0,
+      severity: 0,
+      roughness: 0,
       hit: false,
+      group: obstacleRoot,
+      variants,
     };
-  });
+  }
+  const hazardRouteSample = {};
   scene.add(group);
+
+  function configureHazards(count, routeSampler, difficulty) {
+    for (let index = 0; index < obstacles.length; index += 1) {
+      const obstacle = obstacles[index];
+      const active = index < count && obstacle.active;
+      obstacle.group.visible = active;
+      obstacle.hit = false;
+      if (!active) {
+        obstacle.x = 10000;
+        obstacle.z = 10000;
+        obstacle.radius = 0;
+        for (
+          let variantIndex = 0;
+          variantIndex < obstacle.variants.length;
+          variantIndex += 1
+        ) {
+          obstacle.variants[variantIndex].group.visible = false;
+        }
+        continue;
+      }
+
+      routeSampler(
+        obstacle.routeDistance,
+        difficulty,
+        hazardRouteSample,
+      );
+      obstacle.x = (
+        hazardRouteSample.centerX
+        + hazardRouteSample.normalX * obstacle.laneOffset
+      );
+      obstacle.z = (
+        hazardRouteSample.centerZ
+        + hazardRouteSample.normalZ * obstacle.laneOffset
+      );
+      obstacle.group.position.set(
+        obstacle.x,
+        hazardRouteSample.centerY + 0.01,
+        obstacle.z,
+      );
+      obstacle.group.rotation.set(
+        0,
+        Math.atan2(
+          hazardRouteSample.tangentX,
+          hazardRouteSample.tangentZ,
+        ) + ((obstacle.id % 101) / 100 - 0.5) * 0.34,
+        0,
+      );
+      obstacle.group.scale.setScalar(obstacle.size);
+
+      let selectedVariant = obstacle.variants[0];
+      for (
+        let variantIndex = 0;
+        variantIndex < HAZARD_TYPES.length;
+        variantIndex += 1
+      ) {
+        const selected = HAZARD_TYPES[variantIndex] === obstacle.type;
+        obstacle.variants[variantIndex].group.visible = selected;
+        if (selected) selectedVariant = obstacle.variants[variantIndex];
+      }
+      obstacle.radius = selectedVariant.radius * obstacle.size;
+      obstacle.severity = selectedVariant.severity;
+      obstacle.roughness = selectedVariant.roughness;
+    }
+  }
+
+  function resetHazards() {
+    for (let index = 0; index < obstacles.length; index += 1) {
+      const obstacle = obstacles[index];
+      obstacle.active = false;
+      obstacle.hit = false;
+      obstacle.x = 10000;
+      obstacle.z = 10000;
+      obstacle.radius = 0;
+      obstacle.group.visible = false;
+    }
+  }
 
   function placeMarker(marker, sample, yOffset, widthScale = 1) {
     marker.position.set(
@@ -293,7 +472,7 @@ export function createRoadGameplay(scene) {
     const forwardZ = Math.cos(heading);
 
     for (const obstacle of obstacles) {
-      if (obstacle.hit) continue;
+      if (!obstacle.active || obstacle.hit) continue;
       const dx = obstacle.x - position.x;
       const dz = obstacle.z - position.z;
       const lateral = dx * sideX + dz * sideZ;
@@ -315,7 +494,7 @@ export function createRoadGameplay(scene) {
     let roughness = 0.08;
     let roll = Math.sin(position.z * 0.18 + position.x * 0.31) * 0.12;
     for (const obstacle of obstacles) {
-      if (obstacle.type !== "patch" && obstacle.type !== "pothole") continue;
+      if (!obstacle.active || obstacle.type !== HAZARD_POTHOLE) continue;
       const dx = position.x - obstacle.x;
       const dz = position.z - obstacle.z;
       const reach = obstacle.radius + 2.1;
@@ -331,15 +510,15 @@ export function createRoadGameplay(scene) {
   }
 
   function reset() {
-    obstacles.forEach((obstacle) => {
-      obstacle.hit = false;
-    });
+    resetHazards();
     resetMissionMarkers();
   }
 
   return {
     group,
     missionGroup,
+    hazardGroup,
+    hazards: obstacles,
     destinationMarker,
     checkpointMarkers,
     checkImpact,
@@ -348,6 +527,8 @@ export function createRoadGameplay(scene) {
     placeCheckpoint,
     setCheckpointTriggered,
     resetMissionMarkers,
+    configureHazards,
+    resetHazards,
     reset,
   };
 }

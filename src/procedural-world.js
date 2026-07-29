@@ -8,6 +8,14 @@ export const SURFACE_DIRT = "DIRT";
 export const SURFACE_GRASS = "GRASS";
 export const SURFACE_GRAVEL = "GRAVEL";
 export const SURFACE_MUD = "MUD";
+export const MAX_ROUTE_HAZARDS = 24;
+
+export const HAZARD_ROCK = "rock";
+export const HAZARD_FALLEN_BRANCH = "fallen-branch";
+export const HAZARD_WOODEN_LOG = "wooden-log";
+export const HAZARD_POTHOLE = "pothole";
+export const HAZARD_BROKEN_CART_WHEEL = "broken-cart-wheel";
+export const HAZARD_HAY_BUNDLE = "hay-bundle";
 
 const ROAD_SEGMENTS = 24;
 const SURFACE_CENTER_RATIO = 0.65;
@@ -26,6 +34,9 @@ const MAX_SIGNS = 5;
 const MAX_EVENT_PEOPLE = 20;
 const OBSTACLES_PER_CHUNK = 10;
 const WORLD_HALF_WIDTH = 135;
+const HAZARD_START_CLEARANCE = 58;
+const HAZARD_DESTINATION_CLEARANCE = 24;
+const HAZARD_CHECKPOINT_CLEARANCE = 14;
 
 const ROAD_LAYOUTS = Object.freeze([
   "Straight",
@@ -530,6 +541,7 @@ export class RoadGenerator {
   constructor(seed) {
     this.seed = seed;
     this.scratch = new THREE.Object3D();
+    this.hazardRouteSample = {};
   }
 
   configure(chunk, chunkIndex, difficulty) {
@@ -843,6 +855,166 @@ export class RoadGenerator {
     ].name;
     target.layout = ROAD_LAYOUTS[layoutIndex];
     return target;
+  }
+
+  generateHazardDescriptors(
+    startRouteDistance,
+    targetRouteDistance,
+    difficulty = 1,
+    checkpointStates,
+    targetHazards,
+  ) {
+    const level = Math.max(1, Math.floor(difficulty));
+    const isEasy = level <= 1;
+    const isHard = level >= 3;
+    const minimumSpacing = isEasy ? 40 : isHard ? 21 : 28;
+    const spacingJitter = isEasy ? 12 : isHard ? 7 : 9;
+    const maximumCount = Math.min(
+      targetHazards.length,
+      isEasy ? 10 : isHard ? 22 : 15,
+      MAX_ROUTE_HAZARDS,
+    );
+    const finalRouteDistance = (
+      targetRouteDistance - HAZARD_DESTINATION_CLEARANCE
+    );
+    let candidateIndex = 0;
+    let hazardCount = 0;
+    let routeDistance = startRouteDistance + HAZARD_START_CLEARANCE;
+
+    while (
+      routeDistance < finalRouteDistance
+      && hazardCount < maximumCount
+      && candidateIndex < MAX_ROUTE_HAZARDS * 4
+    ) {
+      const spacingHash = hash01(
+        this.seed,
+        candidateIndex + level * 101,
+        701,
+      );
+      routeDistance += spacingHash * spacingJitter;
+
+      let checkpointClear = true;
+      for (
+        let checkpointIndex = 0;
+        checkpointIndex < checkpointStates.length;
+        checkpointIndex += 1
+      ) {
+        if (
+          Math.abs(
+            checkpointStates[checkpointIndex].routeDistance - routeDistance,
+          ) < HAZARD_CHECKPOINT_CLEARANCE
+        ) {
+          checkpointClear = false;
+          break;
+        }
+      }
+
+      if (checkpointClear && routeDistance < finalRouteDistance) {
+        const descriptor = targetHazards[hazardCount];
+        const sample = this.sampleRouteDistance(
+          routeDistance,
+          level,
+          this.hazardRouteSample,
+        );
+        const laneHash = hash01(
+          this.seed,
+          candidateIndex + level * 131,
+          709,
+        );
+        let normalizedLane = 0;
+        if (isEasy) {
+          normalizedLane = laneHash < 0.34
+            ? -0.32
+            : laneHash < 0.67 ? 0 : 0.32;
+        } else if (isHard) {
+          if (laneHash < 0.14) normalizedLane = -0.78;
+          else if (laneHash < 0.28) normalizedLane = -0.5;
+          else if (laneHash < 0.42) normalizedLane = -0.24;
+          else if (laneHash < 0.58) normalizedLane = 0;
+          else if (laneHash < 0.72) normalizedLane = 0.24;
+          else if (laneHash < 0.86) normalizedLane = 0.5;
+          else normalizedLane = 0.78;
+        } else if (laneHash < 0.18) normalizedLane = -0.55;
+        else if (laneHash < 0.36) normalizedLane = -0.28;
+        else if (laneHash < 0.64) normalizedLane = 0;
+        else if (laneHash < 0.82) normalizedLane = 0.28;
+        else normalizedLane = 0.55;
+
+        const typeHash = hash01(
+          this.seed,
+          candidateIndex + level * 173,
+          719,
+        );
+        let type;
+        if (
+          sample.layout === "Slight Uphill"
+          || sample.layout === "Slight Downhill"
+          || sample.layout === "Uneven Road"
+        ) {
+          type = typeHash < 0.52 ? HAZARD_ROCK : HAZARD_POTHOLE;
+        } else if (
+          sample.theme === "Village Outskirts"
+          || sample.theme === "Village Centre"
+        ) {
+          type = typeHash < 0.5
+            ? HAZARD_BROKEN_CART_WHEEL
+            : HAZARD_HAY_BUNDLE;
+        } else if (
+          sample.layout === "Gentle Left Curve"
+          || sample.layout === "Gentle Right Curve"
+          || sample.layout === "S-Curve"
+        ) {
+          type = typeHash < 0.5
+            ? HAZARD_FALLEN_BRANCH
+            : HAZARD_WOODEN_LOG;
+        } else {
+          const typeIndex = Math.min(5, Math.floor(typeHash * 6));
+          if (typeIndex === 0) type = HAZARD_ROCK;
+          else if (typeIndex === 1) type = HAZARD_FALLEN_BRANCH;
+          else if (typeIndex === 2) type = HAZARD_WOODEN_LOG;
+          else if (typeIndex === 3) type = HAZARD_POTHOLE;
+          else if (typeIndex === 4) type = HAZARD_BROKEN_CART_WHEEL;
+          else type = HAZARD_HAY_BUNDLE;
+        }
+
+        const sizeHash = hash01(
+          this.seed,
+          candidateIndex + level * 199,
+          727,
+        );
+        const minimumSize = isEasy ? 0.78 : isHard ? 1 : 0.9;
+        const sizeRange = isEasy ? 0.18 : isHard ? 0.2 : 0.18;
+        const absoluteLane = Math.abs(normalizedLane);
+
+        descriptor.id = hashUint(
+          this.seed,
+          candidateIndex + level * 211,
+          733,
+        );
+        descriptor.routeDistance = routeDistance;
+        descriptor.laneOffset = normalizedLane * sample.width * 0.5;
+        descriptor.lane = absoluteLane < 0.12
+          ? "centre"
+          : absoluteLane >= 0.68
+            ? normalizedLane < 0 ? "edge-left" : "edge-right"
+            : normalizedLane < 0 ? "left" : "right";
+        descriptor.type = type;
+        descriptor.size = minimumSize + sizeHash * sizeRange;
+        descriptor.difficulty = level;
+        descriptor.chunkIndex = sample.chunkIndex;
+        descriptor.theme = sample.theme;
+        descriptor.active = true;
+        hazardCount += 1;
+      }
+
+      routeDistance += minimumSpacing;
+      candidateIndex += 1;
+    }
+
+    for (let index = hazardCount; index < targetHazards.length; index += 1) {
+      targetHazards[index].active = false;
+    }
+    return hazardCount;
   }
 }
 
@@ -1547,6 +1719,22 @@ export class WorldGenerator {
       routeDistance,
       difficulty,
       target,
+    );
+  }
+
+  generateHazardDescriptors(
+    startRouteDistance,
+    targetRouteDistance,
+    difficulty,
+    checkpointStates,
+    targetHazards,
+  ) {
+    return this.roadGenerator.generateHazardDescriptors(
+      startRouteDistance,
+      targetRouteDistance,
+      difficulty,
+      checkpointStates,
+      targetHazards,
     );
   }
 

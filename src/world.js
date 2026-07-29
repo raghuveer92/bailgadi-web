@@ -55,5 +55,18 @@ export function createWorld(scene) {
     sampleRouteDistance: (routeDistance, difficulty = 1, target = {}) => (
       worldGenerator.sampleRouteDistance(routeDistance, difficulty, target)
     ),
+    generateHazardDescriptors: (
+      startRouteDistance,
+      targetRouteDistance,
+      difficulty,
+      checkpointStates,
+      targetHazards,
+    ) => worldGenerator.generateHazardDescriptors(
+      startRouteDistance,
+      targetRouteDistance,
+      difficulty,
+      checkpointStates,
+      targetHazards,
+    ),
   };
 }

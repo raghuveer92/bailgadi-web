@@ -220,6 +220,7 @@ const {
   sun,
   villageLife,
   worldGenerator,
+  generateHazardDescriptors,
   getRoutePosition,
   sampleRouteDistance,
   sampleRoad,
@@ -340,6 +341,14 @@ const routeState = {
   completionEligible: false,
   chunkIndex: 0,
   localDistance: 0,
+};
+const hazardState = {
+  hazardCount: 0,
+  nextHazardDistance: -1,
+  nextHazardType: "None",
+  nextHazardLane: "None",
+  nearestHazardRouteDistance: -1,
+  hazardSeed: 0,
 };
 const roadState = {
   zone: ROAD_ZONE_CENTER,
@@ -590,6 +599,54 @@ function rebuildMissionRouteMarkers() {
   updateNextCheckpointRouteDistance();
 }
 
+function updateHazardState() {
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  let nextDistance = Number.POSITIVE_INFINITY;
+  let nearestRouteDistance = -1;
+  let nextType = "None";
+  let nextLane = "None";
+  for (let index = 0; index < roadGameplay.hazards.length; index += 1) {
+    const hazard = roadGameplay.hazards[index];
+    if (!hazard.active) continue;
+    const relativeDistance = (
+      hazard.routeDistance - routeState.currentRouteDistance
+    );
+    const absoluteDistance = Math.abs(relativeDistance);
+    if (absoluteDistance < nearestDistance) {
+      nearestDistance = absoluteDistance;
+      nearestRouteDistance = hazard.routeDistance;
+    }
+    if (relativeDistance >= 0 && relativeDistance < nextDistance) {
+      nextDistance = relativeDistance;
+      nextType = hazard.type;
+      nextLane = hazard.lane;
+    }
+  }
+  hazardState.nextHazardDistance = Number.isFinite(nextDistance)
+    ? nextDistance
+    : -1;
+  hazardState.nextHazardType = nextType;
+  hazardState.nextHazardLane = nextLane;
+  hazardState.nearestHazardRouteDistance = nearestRouteDistance;
+}
+
+function rebuildProceduralHazards() {
+  hazardState.hazardCount = generateHazardDescriptors(
+    routeState.startRouteDistance,
+    routeState.targetRouteDistance,
+    state.mission.level,
+    checkpointMarkerStates,
+    roadGameplay.hazards,
+  );
+  roadGameplay.configureHazards(
+    hazardState.hazardCount,
+    sampleRouteDistance,
+    state.mission.level,
+  );
+  hazardState.hazardSeed = worldGenerator.seed;
+  updateHazardState();
+}
+
 function initializeMissionRoute() {
   routeState.currentRouteDistance = currentRoadSample.routeDistance;
   routeState.startRouteDistance = currentRoadSample.routeDistance;
@@ -605,6 +662,7 @@ function initializeMissionRoute() {
   routeState.localDistance = currentRoadSample.localDistance;
   state.progress = 0;
   rebuildMissionRouteMarkers();
+  rebuildProceduralHazards();
 }
 
 function updateRoadState(delta, resetTransitions = false) {
@@ -830,6 +888,7 @@ function updateJourneyProgress() {
   );
   routeState.chunkIndex = currentRoadSample.chunkIndex;
   routeState.localDistance = currentRoadSample.localDistance;
+  updateHazardState();
   state.progress = Math.min(
     routeState.travelledRouteDistance,
     routeState.requiredRouteDistance,
@@ -1384,6 +1443,7 @@ function updateHud() {
         localDistance: Number(routeState.localDistance.toFixed(3)),
       },
       missionMarkers: missionMarkerState,
+      proceduralHazards: hazardState,
     });
   }
 }
@@ -1586,6 +1646,7 @@ window.__bailgadi = {
       }
       : undefined,
     missionMarkers: import.meta.env.DEV ? missionMarkerState : undefined,
+    proceduralHazards: import.meta.env.DEV ? hazardState : undefined,
   }),
   start: startGame,
 };

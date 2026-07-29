@@ -52,5 +52,8 @@ export function createWorld(scene) {
     getRoutePosition: (position, difficulty = 1, target = {}) => (
       worldGenerator.getRoutePosition(position, difficulty, target)
     ),
+    sampleRouteDistance: (routeDistance, difficulty = 1, target = {}) => (
+      worldGenerator.sampleRouteDistance(routeDistance, difficulty, target)
+    ),
   };
 }

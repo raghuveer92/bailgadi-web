@@ -38,6 +38,8 @@ const ROAD_LIMIT_WIDTH_RESPONSE = 2.4;
 const ROAD_EXCESS_RETURN_RESPONSE = 1.2;
 const ROAD_OFF_ROAD_RESISTANCE_MIN = 0.025;
 const ROAD_OFF_ROAD_RESISTANCE_MAX = 0.08;
+const DESTINATION_ROUTE_TOLERANCE = 5;
+const DESTINATION_LATERAL_TOLERANCE = 7.5;
 const SURFACE_BLEND_RESPONSE = 4.5;
 const SURFACE_PROFILES = Object.freeze({
   [SURFACE_ROAD]: Object.freeze({
@@ -219,6 +221,7 @@ const {
   villageLife,
   worldGenerator,
   getRoutePosition,
+  sampleRouteDistance,
   sampleRoad,
 } = createWorld(scene);
 const roadGameplay = createRoadGameplay(scene);
@@ -285,6 +288,46 @@ const behindRoadSample = {};
 const aheadRoadPosition = { x: 0, z: 0 };
 const behindRoadPosition = { x: 0, z: 0 };
 const candidateRoadPosition = { x: 0, z: 0 };
+const missionRouteSample = {};
+const checkpointMarkerStates = [
+  {
+    remainingDistance: CHECKPOINTS[0],
+    routeDistance: 0,
+    worldPosition: { x: 0, y: 0, z: 0 },
+    triggered: false,
+  },
+  {
+    remainingDistance: CHECKPOINTS[1],
+    routeDistance: 0,
+    worldPosition: { x: 0, y: 0, z: 0 },
+    triggered: false,
+  },
+  {
+    remainingDistance: CHECKPOINTS[2],
+    routeDistance: 0,
+    worldPosition: { x: 0, y: 0, z: 0 },
+    triggered: false,
+  },
+  {
+    remainingDistance: CHECKPOINTS[3],
+    routeDistance: 0,
+    worldPosition: { x: 0, y: 0, z: 0 },
+    triggered: false,
+  },
+];
+const missionMarkerState = {
+  destinationRouteDistance: 0,
+  destinationWorldPosition: { x: 0, y: 0, z: 0 },
+  destinationNormalX: 1,
+  destinationNormalZ: 0,
+  distanceToDestinationByRoute: 0,
+  lateralDistanceFromDestination: 0,
+  arrivalZoneActive: false,
+  nextCheckpointIndex: 0,
+  nextCheckpointWorldPosition: { x: 0, y: 0, z: 0 },
+  nextCheckpointTriggered: false,
+  checkpoints: checkpointMarkerStates,
+};
 const routeState = {
   currentRouteDistance: 0,
   startRouteDistance: 0,
@@ -479,15 +522,72 @@ function initializeRoadPose() {
 
 function updateNextCheckpointRouteDistance() {
   routeState.nextCheckpointRouteDistance = routeState.targetRouteDistance;
+  missionMarkerState.nextCheckpointIndex = -1;
+  missionMarkerState.nextCheckpointTriggered = true;
+  missionMarkerState.nextCheckpointWorldPosition.x =
+    missionMarkerState.destinationWorldPosition.x;
+  missionMarkerState.nextCheckpointWorldPosition.y =
+    missionMarkerState.destinationWorldPosition.y;
+  missionMarkerState.nextCheckpointWorldPosition.z =
+    missionMarkerState.destinationWorldPosition.z;
   for (let index = 0; index < CHECKPOINTS.length; index += 1) {
     const checkpoint = CHECKPOINTS[index];
     if (!state.passedCheckpoints.has(checkpoint)) {
       routeState.nextCheckpointRouteDistance = (
         routeState.targetRouteDistance - checkpoint
       );
+      const checkpointState = checkpointMarkerStates[index];
+      missionMarkerState.nextCheckpointIndex = index;
+      missionMarkerState.nextCheckpointTriggered =
+        checkpointState.triggered;
+      missionMarkerState.nextCheckpointWorldPosition.x =
+        checkpointState.worldPosition.x;
+      missionMarkerState.nextCheckpointWorldPosition.y =
+        checkpointState.worldPosition.y;
+      missionMarkerState.nextCheckpointWorldPosition.z =
+        checkpointState.worldPosition.z;
       return;
     }
   }
+}
+
+function rebuildMissionRouteMarkers() {
+  sampleRouteDistance(
+    routeState.targetRouteDistance,
+    state.mission.level,
+    missionRouteSample,
+  );
+  roadGameplay.placeDestination(missionRouteSample);
+  missionMarkerState.destinationRouteDistance =
+    routeState.targetRouteDistance;
+  missionMarkerState.destinationWorldPosition.x = missionRouteSample.centerX;
+  missionMarkerState.destinationWorldPosition.y = missionRouteSample.centerY;
+  missionMarkerState.destinationWorldPosition.z = missionRouteSample.centerZ;
+  missionMarkerState.destinationNormalX = missionRouteSample.normalX;
+  missionMarkerState.destinationNormalZ = missionRouteSample.normalZ;
+  missionMarkerState.distanceToDestinationByRoute =
+    routeState.requiredRouteDistance;
+  missionMarkerState.lateralDistanceFromDestination = 0;
+  missionMarkerState.arrivalZoneActive = false;
+
+  for (let index = 0; index < CHECKPOINTS.length; index += 1) {
+    const checkpointState = checkpointMarkerStates[index];
+    checkpointState.routeDistance = (
+      routeState.targetRouteDistance - CHECKPOINTS[index]
+    );
+    checkpointState.triggered = false;
+    sampleRouteDistance(
+      checkpointState.routeDistance,
+      state.mission.level,
+      missionRouteSample,
+    );
+    checkpointState.worldPosition.x = missionRouteSample.centerX;
+    checkpointState.worldPosition.y = missionRouteSample.centerY;
+    checkpointState.worldPosition.z = missionRouteSample.centerZ;
+    roadGameplay.placeCheckpoint(index, missionRouteSample);
+    roadGameplay.setCheckpointTriggered(index, false);
+  }
+  updateNextCheckpointRouteDistance();
 }
 
 function initializeMissionRoute() {
@@ -504,7 +604,7 @@ function initializeMissionRoute() {
   routeState.chunkIndex = currentRoadSample.chunkIndex;
   routeState.localDistance = currentRoadSample.localDistance;
   state.progress = 0;
-  updateNextCheckpointRouteDistance();
+  rebuildMissionRouteMarkers();
 }
 
 function updateRoadState(delta, resetTransitions = false) {
@@ -728,9 +828,6 @@ function updateJourneyProgress() {
     0,
     1,
   );
-  routeState.completionEligible = (
-    routeState.currentRouteDistance >= routeState.targetRouteDistance
-  );
   routeState.chunkIndex = currentRoadSample.chunkIndex;
   routeState.localDistance = currentRoadSample.localDistance;
   state.progress = Math.min(
@@ -747,10 +844,37 @@ function updateJourneyProgress() {
       && !state.passedCheckpoints.has(checkpoint)
     ) {
       state.passedCheckpoints.add(checkpoint);
+      checkpointMarkerStates[index].triggered = true;
+      roadGameplay.setCheckpointTriggered(index, true);
       showCheckpoint(checkpoint);
     }
   }
   updateNextCheckpointRouteDistance();
+  const routeDistanceFromDestination = Math.abs(
+    routeState.targetRouteDistance - routeState.currentRouteDistance,
+  );
+  const destinationDeltaX = (
+    cart.position.x - missionMarkerState.destinationWorldPosition.x
+  );
+  const destinationDeltaZ = (
+    cart.position.z - missionMarkerState.destinationWorldPosition.z
+  );
+  const destinationLateralDistance = Math.abs(
+    destinationDeltaX * missionMarkerState.destinationNormalX
+    + destinationDeltaZ * missionMarkerState.destinationNormalZ
+  );
+  missionMarkerState.distanceToDestinationByRoute =
+    routeDistanceFromDestination;
+  missionMarkerState.lateralDistanceFromDestination =
+    destinationLateralDistance;
+  missionMarkerState.arrivalZoneActive = (
+    routeDistanceFromDestination <= DESTINATION_ROUTE_TOLERANCE
+    && destinationLateralDistance <= DESTINATION_LATERAL_TOLERANCE
+  );
+  routeState.completionEligible = (
+    routeState.currentRouteDistance >= routeState.targetRouteDistance
+    && missionMarkerState.arrivalZoneActive
+  );
   if (routeState.completionEligible) beginJourneyFinish();
 }
 
@@ -1259,6 +1383,7 @@ function updateHud() {
         chunkIndex: routeState.chunkIndex,
         localDistance: Number(routeState.localDistance.toFixed(3)),
       },
+      missionMarkers: missionMarkerState,
     });
   }
 }
@@ -1460,6 +1585,7 @@ window.__bailgadi = {
         localDistance: routeState.localDistance,
       }
       : undefined,
+    missionMarkers: import.meta.env.DEV ? missionMarkerState : undefined,
   }),
   start: startGame,
 };

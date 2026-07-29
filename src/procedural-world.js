@@ -703,6 +703,147 @@ export class RoadGenerator {
     target.roadHeight = target.height;
     return target;
   }
+
+  sampleRouteDistance(routeDistance, difficulty = 1, target = {}) {
+    let chunkIndex = 0;
+    let localDistance = routeDistance;
+    let chunkLength = 0;
+    if (routeDistance >= 0) {
+      while (true) {
+        chunkLength = roadChunkRouteLength(
+          this.seed,
+          chunkIndex,
+          difficulty,
+        );
+        if (localDistance < chunkLength) break;
+        localDistance -= chunkLength;
+        chunkIndex += 1;
+      }
+    } else {
+      chunkIndex = -1;
+      let distanceFromOrigin = -routeDistance;
+      while (true) {
+        chunkLength = roadChunkRouteLength(
+          this.seed,
+          chunkIndex,
+          difficulty,
+        );
+        if (distanceFromOrigin <= chunkLength) {
+          localDistance = chunkLength - distanceFromOrigin;
+          break;
+        }
+        distanceFromOrigin -= chunkLength;
+        chunkIndex -= 1;
+      }
+    }
+
+    const layoutIndex = roadLayoutIndexFor(
+      this.seed,
+      chunkIndex,
+      difficulty,
+    );
+    const chunkStartZ = chunkIndex * CHUNK_LENGTH;
+    let previousProgress = 0;
+    let previousZ = chunkStartZ;
+    let previousCenter = chunkCenterOffset(
+      this.seed,
+      previousZ,
+      difficulty,
+    ) + localRoadOffset(layoutIndex, 0, difficulty);
+    let previousHeight = roadHeightAt(layoutIndex, previousZ, 0);
+    let accumulatedDistance = 0;
+    let centerX = previousCenter;
+    let centerY = previousHeight;
+    let centerZ = previousZ;
+    let tangentX = 0;
+    let tangentZ = 1;
+    let width = roadWidthAt(
+      this.seed,
+      chunkIndex,
+      layoutIndex,
+      0,
+      difficulty,
+    );
+    let slope = 0;
+
+    for (let segment = 1; segment <= ROAD_SEGMENTS; segment += 1) {
+      const progress = segment / ROAD_SEGMENTS;
+      const worldZ = chunkStartZ + progress * CHUNK_LENGTH;
+      const center = chunkCenterOffset(this.seed, worldZ, difficulty)
+        + localRoadOffset(layoutIndex, progress, difficulty);
+      const height = roadHeightAt(layoutIndex, worldZ, progress);
+      const deltaX = center - previousCenter;
+      const deltaY = height - previousHeight;
+      const deltaZ = worldZ - previousZ;
+      const segmentLength = Math.hypot(deltaX, deltaY, deltaZ);
+      if (
+        localDistance <= accumulatedDistance + segmentLength
+        || segment === ROAD_SEGMENTS
+      ) {
+        const segmentProgress = THREE.MathUtils.clamp(
+          (localDistance - accumulatedDistance) / segmentLength,
+          0,
+          1,
+        );
+        const horizontalLength = Math.hypot(deltaX, deltaZ);
+        centerX = THREE.MathUtils.lerp(
+          previousCenter,
+          center,
+          segmentProgress,
+        );
+        centerY = THREE.MathUtils.lerp(
+          previousHeight,
+          height,
+          segmentProgress,
+        );
+        centerZ = THREE.MathUtils.lerp(previousZ, worldZ, segmentProgress);
+        tangentX = deltaX / horizontalLength;
+        tangentZ = deltaZ / horizontalLength;
+        width = THREE.MathUtils.lerp(
+          roadWidthAt(
+            this.seed,
+            chunkIndex,
+            layoutIndex,
+            previousProgress,
+            difficulty,
+          ),
+          roadWidthAt(
+            this.seed,
+            chunkIndex,
+            layoutIndex,
+            progress,
+            difficulty,
+          ),
+          segmentProgress,
+        );
+        slope = deltaY / horizontalLength;
+        break;
+      }
+      accumulatedDistance += segmentLength;
+      previousProgress = progress;
+      previousZ = worldZ;
+      previousCenter = center;
+      previousHeight = height;
+    }
+
+    target.chunkIndex = chunkIndex;
+    target.localDistance = localDistance;
+    target.routeDistance = routeDistance;
+    target.centerX = centerX;
+    target.centerY = centerY;
+    target.centerZ = centerZ;
+    target.tangentX = tangentX;
+    target.tangentZ = tangentZ;
+    target.normalX = tangentZ;
+    target.normalZ = -tangentX;
+    target.width = width;
+    target.slope = slope;
+    target.theme = THEME_DEFINITIONS[
+      themeIndexFor(this.seed, chunkIndex)
+    ].name;
+    target.layout = ROAD_LAYOUTS[layoutIndex];
+    return target;
+  }
 }
 
 export class EnvironmentGenerator {
@@ -1396,6 +1537,14 @@ export class WorldGenerator {
   getRoutePosition(worldPosition, difficulty = 1, target = {}) {
     return this.roadGenerator.getRoutePosition(
       worldPosition,
+      difficulty,
+      target,
+    );
+  }
+
+  sampleRouteDistance(routeDistance, difficulty = 1, target = {}) {
+    return this.roadGenerator.sampleRouteDistance(
+      routeDistance,
       difficulty,
       target,
     );

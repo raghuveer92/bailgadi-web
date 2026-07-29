@@ -178,13 +178,57 @@ function createDestinationMarker() {
     crown.position.set(x, y, z);
     marker.add(crown);
   });
-  marker.position.set(0, 0, 480);
+  marker.visible = false;
+  return marker;
+}
+
+function createCheckpointMarker(index) {
+  const marker = new THREE.Group();
+  marker.name = `RouteCheckpoint${index + 1}`;
+  for (let side = -1; side <= 1; side += 2) {
+    const post = prepareMesh(new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.16, 4.2, 7),
+      DESTINATION_WOOD,
+    ));
+    post.position.set(side * 8.2, 2.1, 0);
+    marker.add(post);
+  }
+  const beam = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(16.6, 0.2, 0.24),
+    DESTINATION_WOOD,
+  ));
+  beam.position.y = 4.05;
+  marker.add(beam);
+  for (let flagIndex = -2; flagIndex <= 2; flagIndex += 1) {
+    const flag = prepareMesh(new THREE.Mesh(
+      new THREE.ConeGeometry(0.24, 0.58, 3),
+      DESTINATION_CLOTH,
+    ));
+    flag.rotation.z = Math.PI;
+    flag.position.set(flagIndex * 2.4, 3.72, 0);
+    marker.add(flag);
+  }
+  marker.visible = false;
   return marker;
 }
 
 export function createRoadGameplay(scene) {
   const group = new THREE.Group();
   group.name = "RoadGameplay";
+  const missionGroup = new THREE.Group();
+  missionGroup.name = "MissionRouteMarkers";
+  const destinationMarker = createDestinationMarker();
+  const checkpointMarkers = [
+    createCheckpointMarker(0),
+    createCheckpointMarker(1),
+    createCheckpointMarker(2),
+    createCheckpointMarker(3),
+  ];
+  missionGroup.add(destinationMarker);
+  for (let index = 0; index < checkpointMarkers.length; index += 1) {
+    missionGroup.add(checkpointMarkers[index]);
+  }
+  group.add(missionGroup);
 
   const obstacles = ROAD_OBSTACLES.map((placement, index) => {
     const created = createObstacle(placement.type);
@@ -198,8 +242,49 @@ export function createRoadGameplay(scene) {
       hit: false,
     };
   });
-  group.add(createDestinationMarker());
   scene.add(group);
+
+  function placeMarker(marker, sample, yOffset, widthScale = 1) {
+    marker.position.set(
+      sample.centerX,
+      sample.centerY + yOffset,
+      sample.centerZ,
+    );
+    marker.rotation.set(
+      0,
+      Math.atan2(sample.tangentX, sample.tangentZ),
+      0,
+    );
+    marker.scale.set(widthScale, 1, 1);
+    marker.visible = true;
+  }
+
+  function placeDestination(sample) {
+    placeMarker(destinationMarker, sample, 0.012);
+  }
+
+  function placeCheckpoint(index, sample) {
+    const marker = checkpointMarkers[index];
+    if (!marker) return;
+    placeMarker(
+      marker,
+      sample,
+      0.018,
+      Math.max(0.84, sample.width / 16.6),
+    );
+  }
+
+  function setCheckpointTriggered(index, triggered) {
+    const marker = checkpointMarkers[index];
+    if (marker) marker.visible = !triggered;
+  }
+
+  function resetMissionMarkers() {
+    destinationMarker.visible = false;
+    for (let index = 0; index < checkpointMarkers.length; index += 1) {
+      checkpointMarkers[index].visible = false;
+    }
+  }
 
   function checkImpact(position, heading) {
     const sideX = Math.cos(heading);
@@ -249,7 +334,20 @@ export function createRoadGameplay(scene) {
     obstacles.forEach((obstacle) => {
       obstacle.hit = false;
     });
+    resetMissionMarkers();
   }
 
-  return { group, obstacles, checkImpact, sampleSurface, reset };
+  return {
+    group,
+    missionGroup,
+    destinationMarker,
+    checkpointMarkers,
+    checkImpact,
+    sampleSurface,
+    placeDestination,
+    placeCheckpoint,
+    setCheckpointTriggered,
+    resetMissionMarkers,
+    reset,
+  };
 }

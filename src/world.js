@@ -68,5 +68,22 @@ export function createWorld(scene) {
       checkpointStates,
       targetHazards,
     ),
+    generateEventDescriptors: (
+      startRouteDistance,
+      targetRouteDistance,
+      difficulty,
+      missionKey,
+      checkpointStates,
+      hazardDescriptors,
+      targetEvents,
+    ) => worldGenerator.generateEventDescriptors(
+      startRouteDistance,
+      targetRouteDistance,
+      difficulty,
+      missionKey,
+      checkpointStates,
+      hazardDescriptors,
+      targetEvents,
+    ),
   };
 }

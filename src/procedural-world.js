@@ -9,6 +9,7 @@ export const SURFACE_GRASS = "GRASS";
 export const SURFACE_GRAVEL = "GRAVEL";
 export const SURFACE_MUD = "MUD";
 export const MAX_ROUTE_HAZARDS = 24;
+export const MAX_ROUTE_EVENTS = 8;
 
 export const HAZARD_ROCK = "rock";
 export const HAZARD_FALLEN_BRANCH = "fallen-branch";
@@ -16,6 +17,12 @@ export const HAZARD_WOODEN_LOG = "wooden-log";
 export const HAZARD_POTHOLE = "pothole";
 export const HAZARD_BROKEN_CART_WHEEL = "broken-cart-wheel";
 export const HAZARD_HAY_BUNDLE = "hay-bundle";
+export const EVENT_BROKEN_BULLOCK_CART = "broken-bullock-cart";
+export const EVENT_CATTLE_CROSSING = "cattle-crossing";
+export const EVENT_VILLAGE_CROWD = "village-crowd";
+export const EVENT_ROAD_REPAIR = "road-repair";
+export const EVENT_MARKET_SPILL = "small-market-spill";
+export const EVENT_WATER_PUDDLE = "water-puddle";
 
 const ROAD_SEGMENTS = 24;
 const SURFACE_CENTER_RATIO = 0.65;
@@ -37,6 +44,10 @@ const WORLD_HALF_WIDTH = 135;
 const HAZARD_START_CLEARANCE = 58;
 const HAZARD_DESTINATION_CLEARANCE = 24;
 const HAZARD_CHECKPOINT_CLEARANCE = 14;
+const EVENT_START_CLEARANCE = 62;
+const EVENT_DESTINATION_CLEARANCE = 30;
+const EVENT_CHECKPOINT_CLEARANCE = 18;
+const EVENT_HAZARD_CLEARANCE = 2.5;
 
 const ROAD_LAYOUTS = Object.freeze([
   "Straight",
@@ -542,6 +553,8 @@ export class RoadGenerator {
     this.seed = seed;
     this.scratch = new THREE.Object3D();
     this.hazardRouteSample = {};
+    this.eventRouteSample = {};
+    this.previousEventRouteSample = {};
   }
 
   configure(chunk, chunkIndex, difficulty) {
@@ -1015,6 +1028,180 @@ export class RoadGenerator {
       targetHazards[index].active = false;
     }
     return hazardCount;
+  }
+
+  generateEventDescriptors(
+    startRouteDistance,
+    targetRouteDistance,
+    difficulty = 1,
+    missionKey = 0,
+    checkpointStates,
+    hazardDescriptors,
+    targetEvents,
+  ) {
+    const level = Math.max(1, Math.floor(difficulty));
+    const missionSalt = Math.max(0, Math.floor(missionKey));
+    const isEasy = level <= 1;
+    const isHard = level >= 3;
+    const minimumSpacing = isEasy ? 112 : isHard ? 40 : 84;
+    const spacingJitter = isEasy ? 14 : isHard ? 12 : 16;
+    const maximumCount = Math.min(
+      targetEvents.length,
+      isEasy ? 2 : isHard ? 6 : 3,
+      MAX_ROUTE_EVENTS,
+    );
+    const finalRouteDistance = (
+      targetRouteDistance - EVENT_DESTINATION_CLEARANCE
+    );
+    let candidateIndex = 0;
+    let eventCount = 0;
+    let routeDistance = startRouteDistance + EVENT_START_CLEARANCE;
+
+    while (
+      routeDistance < finalRouteDistance
+      && eventCount < maximumCount
+      && candidateIndex < MAX_ROUTE_EVENTS * 12
+    ) {
+      const deterministicIndex = (
+        candidateIndex + level * 149 + missionSalt * 977
+      );
+      routeDistance += hash01(
+        this.seed,
+        deterministicIndex,
+        811,
+      ) * spacingJitter;
+
+      const sample = this.sampleRouteDistance(
+        routeDistance,
+        level,
+        this.eventRouteSample,
+      );
+      this.sampleRouteDistance(
+        routeDistance - 22,
+        level,
+        this.previousEventRouteSample,
+      );
+      const typeHash = hash01(
+        this.seed,
+        deterministicIndex,
+        823,
+      );
+      let type;
+      if (
+        sample.theme === "Village Outskirts"
+        || sample.theme === "Village Centre"
+      ) {
+        if (typeHash < 0.34) type = EVENT_VILLAGE_CROWD;
+        else if (typeHash < 0.67) type = EVENT_MARKET_SPILL;
+        else type = EVENT_BROKEN_BULLOCK_CART;
+      } else if (sample.layout === "Fork-Ready Section") {
+        type = typeHash < 0.55
+          ? EVENT_ROAD_REPAIR
+          : EVENT_CATTLE_CROSSING;
+      } else if (
+        sample.layout === "Slight Uphill"
+        || sample.layout === "Slight Downhill"
+        || sample.layout === "Uneven Road"
+        || this.previousEventRouteSample.layout === "Slight Uphill"
+        || this.previousEventRouteSample.layout === "Slight Downhill"
+      ) {
+        type = typeHash < 0.45
+          ? EVENT_WATER_PUDDLE
+          : EVENT_BROKEN_BULLOCK_CART;
+      } else {
+        const typeIndex = Math.min(5, Math.floor(typeHash * 6));
+        if (typeIndex === 0) type = EVENT_BROKEN_BULLOCK_CART;
+        else if (typeIndex === 1) type = EVENT_CATTLE_CROSSING;
+        else if (typeIndex === 2) type = EVENT_VILLAGE_CROWD;
+        else if (typeIndex === 3) type = EVENT_ROAD_REPAIR;
+        else if (typeIndex === 4) type = EVENT_MARKET_SPILL;
+        else type = EVENT_WATER_PUDDLE;
+      }
+
+      let length = 7;
+      if (type === EVENT_CATTLE_CROSSING) length = 9;
+      else if (type === EVENT_VILLAGE_CROWD) length = 10;
+      else if (type === EVENT_ROAD_REPAIR) length = 12;
+      else if (type === EVENT_MARKET_SPILL) length = 8;
+      else if (type === EVENT_WATER_PUDDLE) length = 6;
+
+      let placementClear = routeDistance < finalRouteDistance;
+      for (
+        let checkpointIndex = 0;
+        placementClear && checkpointIndex < checkpointStates.length;
+        checkpointIndex += 1
+      ) {
+        placementClear = Math.abs(
+          checkpointStates[checkpointIndex].routeDistance - routeDistance,
+        ) >= EVENT_CHECKPOINT_CLEARANCE + length * 0.5;
+      }
+      for (
+        let hazardIndex = 0;
+        placementClear && hazardIndex < hazardDescriptors.length;
+        hazardIndex += 1
+      ) {
+        const hazard = hazardDescriptors[hazardIndex];
+        if (!hazard.active) continue;
+        placementClear = Math.abs(
+          hazard.routeDistance - routeDistance,
+        ) >= (
+          length * 0.5
+          + (isHard ? 1.25 : EVENT_HAZARD_CLEARANCE)
+        );
+      }
+      for (
+        let previousIndex = 0;
+        placementClear && previousIndex < eventCount;
+        previousIndex += 1
+      ) {
+        const previousEvent = targetEvents[previousIndex];
+        placementClear = Math.abs(
+          previousEvent.routeDistance - routeDistance,
+        ) >= (
+          minimumSpacing
+          + (previousEvent.length + length) * 0.5
+        );
+      }
+
+      if (placementClear) {
+        const descriptor = targetEvents[eventCount];
+        const laneHash = hash01(
+          this.seed,
+          deterministicIndex,
+          829,
+        );
+        let normalizedLane = laneHash < 0.5 ? -0.42 : 0.42;
+        if (type === EVENT_CATTLE_CROSSING) normalizedLane = 0;
+        else if (type === EVENT_ROAD_REPAIR) {
+          normalizedLane = laneHash < 0.5 ? -0.28 : 0.28;
+        } else if (type === EVENT_WATER_PUDDLE) {
+          normalizedLane = (laneHash - 0.5) * 0.8;
+        }
+
+        descriptor.id = hashUint(
+          this.seed,
+          deterministicIndex,
+          839,
+        );
+        descriptor.type = type;
+        descriptor.routeDistance = routeDistance;
+        descriptor.laneOffset = normalizedLane * sample.width * 0.5;
+        descriptor.length = length;
+        descriptor.difficulty = level;
+        descriptor.chunkIndex = sample.chunkIndex;
+        descriptor.theme = sample.theme;
+        descriptor.active = true;
+        eventCount += 1;
+      }
+
+      routeDistance += placementClear ? minimumSpacing : 11;
+      candidateIndex += 1;
+    }
+
+    for (let index = eventCount; index < targetEvents.length; index += 1) {
+      targetEvents[index].active = false;
+    }
+    return eventCount;
   }
 }
 
@@ -1735,6 +1922,26 @@ export class WorldGenerator {
       difficulty,
       checkpointStates,
       targetHazards,
+    );
+  }
+
+  generateEventDescriptors(
+    startRouteDistance,
+    targetRouteDistance,
+    difficulty,
+    missionKey,
+    checkpointStates,
+    hazardDescriptors,
+    targetEvents,
+  ) {
+    return this.roadGenerator.generateEventDescriptors(
+      startRouteDistance,
+      targetRouteDistance,
+      difficulty,
+      missionKey,
+      checkpointStates,
+      hazardDescriptors,
+      targetEvents,
     );
   }
 

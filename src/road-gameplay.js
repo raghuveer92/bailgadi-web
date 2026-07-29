@@ -1,11 +1,18 @@
 import * as THREE from "three";
 import {
+  EVENT_BROKEN_BULLOCK_CART,
+  EVENT_CATTLE_CROSSING,
+  EVENT_MARKET_SPILL,
+  EVENT_ROAD_REPAIR,
+  EVENT_VILLAGE_CROWD,
+  EVENT_WATER_PUDDLE,
   HAZARD_BROKEN_CART_WHEEL,
   HAZARD_FALLEN_BRANCH,
   HAZARD_HAY_BUNDLE,
   HAZARD_POTHOLE,
   HAZARD_ROCK,
   HAZARD_WOODEN_LOG,
+  MAX_ROUTE_EVENTS,
   MAX_ROUTE_HAZARDS,
 } from "./procedural-world.js";
 
@@ -22,6 +29,16 @@ const WHEEL = material(0x4b3423);
 const WHEEL_HUB = material(0x75502c);
 const HAY = material(0xc9a84e);
 const HAY_TIE = material(0x75502c);
+const EVENT_CLOTH = material(0xc45f38);
+const EVENT_SKIN = material(0x9a6545);
+const EVENT_CATTLE = material(0x927052);
+const EVENT_WHITE = material(0xe2d6b9);
+const EVENT_WATER = new THREE.MeshStandardMaterial({
+  color: 0x5c8e9c,
+  roughness: 0.4,
+  transparent: true,
+  opacity: 0.72,
+});
 const DESTINATION_WOOD = material(0x714526);
 const DESTINATION_CLOTH = material(0xd7a83d);
 const DESTINATION_PLASTER = material(0xd9b271);
@@ -186,6 +203,167 @@ const HAZARD_TYPES = [
   HAZARD_HAY_BUNDLE,
 ];
 
+const EVENT_TYPES = [
+  EVENT_BROKEN_BULLOCK_CART,
+  EVENT_CATTLE_CROSSING,
+  EVENT_VILLAGE_CROWD,
+  EVENT_ROAD_REPAIR,
+  EVENT_MARKET_SPILL,
+  EVENT_WATER_PUDDLE,
+];
+
+function addEventWheel(group, x, z) {
+  const wheel = prepareMesh(new THREE.Mesh(
+    new THREE.TorusGeometry(0.48, 0.07, 6, 12),
+    WHEEL,
+  ));
+  wheel.rotation.y = Math.PI / 2;
+  wheel.position.set(x, 0.5, z);
+  group.add(wheel);
+}
+
+function createBrokenCartEvent() {
+  const group = new THREE.Group();
+  const bed = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(2.5, 0.42, 3.5),
+    WOOD,
+  ));
+  bed.position.y = 0.8;
+  bed.rotation.z = 0.08;
+  group.add(bed);
+  addEventWheel(group, -1.3, -1);
+  addEventWheel(group, -1.3, 1);
+  const load = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(1.5, 0.72, 1.2),
+    HAY,
+  ));
+  load.position.set(0.15, 1.35, 0.15);
+  group.add(load);
+  return group;
+}
+
+function addPlaceholderCattle(group, x, z, rotation) {
+  const cattle = new THREE.Group();
+  const body = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(1.45, 0.72, 0.65),
+    EVENT_CATTLE,
+  ));
+  body.position.y = 0.95;
+  cattle.add(body);
+  const head = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(0.46, 0.48, 0.45),
+    EVENT_WHITE,
+  ));
+  head.position.set(0.88, 1.1, 0);
+  cattle.add(head);
+  for (let side = -1; side <= 1; side += 2) {
+    const leg = prepareMesh(new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.09, 0.7, 5),
+      EVENT_CATTLE,
+    ));
+    leg.position.set(side * 0.45, 0.4, 0);
+    cattle.add(leg);
+  }
+  cattle.position.set(x, 0, z);
+  cattle.rotation.y = rotation;
+  group.add(cattle);
+}
+
+function createCattleCrossingEvent() {
+  const group = new THREE.Group();
+  addPlaceholderCattle(group, -2.3, -1.8, 0.08);
+  addPlaceholderCattle(group, 0, 0, -0.05);
+  addPlaceholderCattle(group, 2.3, 1.8, 0.1);
+  return group;
+}
+
+function addPlaceholderPerson(group, x, z, colorMaterial) {
+  const body = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.25, 1.15, 6),
+    colorMaterial,
+  ));
+  body.position.set(x, 0.65, z);
+  group.add(body);
+  const head = prepareMesh(new THREE.Mesh(
+    new THREE.SphereGeometry(0.17, 7, 5),
+    EVENT_SKIN,
+  ));
+  head.position.set(x, 1.38, z);
+  group.add(head);
+}
+
+function createVillageCrowdEvent() {
+  const group = new THREE.Group();
+  for (let index = 0; index < 6; index += 1) {
+    addPlaceholderPerson(
+      group,
+      (index % 3 - 1) * 0.72,
+      (Math.floor(index / 3) - 0.5) * 1.1,
+      index % 2 === 0 ? EVENT_CLOTH : DESTINATION_CLOTH,
+    );
+  }
+  return group;
+}
+
+function createRoadRepairEvent() {
+  const group = new THREE.Group();
+  for (let row = -1; row <= 1; row += 2) {
+    const barrier = prepareMesh(new THREE.Mesh(
+      new THREE.BoxGeometry(3.6, 0.32, 0.26),
+      DESTINATION_CLOTH,
+    ));
+    barrier.position.set(0, 0.72, row * 2.1);
+    group.add(barrier);
+    for (let side = -1; side <= 1; side += 2) {
+      const post = prepareMesh(new THREE.Mesh(
+        new THREE.BoxGeometry(0.18, 1.25, 0.18),
+        WOOD,
+      ));
+      post.position.set(side * 1.55, 0.62, row * 2.1);
+      group.add(post);
+    }
+  }
+  return group;
+}
+
+function createMarketSpillEvent() {
+  const group = new THREE.Group();
+  const hay = createObstacle(HAZARD_HAY_BUNDLE).group;
+  hay.position.set(-0.8, 0, -1.2);
+  hay.scale.setScalar(0.78);
+  group.add(hay);
+  const rock = createRock().group;
+  rock.position.set(0.85, 0, 0.25);
+  group.add(rock);
+  const log = createLog().group;
+  log.position.set(-0.15, 0, 1.55);
+  log.scale.setScalar(0.72);
+  group.add(log);
+  return group;
+}
+
+function createWaterPuddleEvent() {
+  const group = new THREE.Group();
+  const puddle = prepareMesh(new THREE.Mesh(
+    new THREE.CircleGeometry(2.2, 16),
+    EVENT_WATER,
+  ), false);
+  puddle.rotation.x = -Math.PI / 2;
+  puddle.position.y = 0.055;
+  puddle.scale.set(1, 0.62, 1);
+  group.add(puddle);
+  return group;
+}
+
+function createEventVisual(type) {
+  if (type === EVENT_BROKEN_BULLOCK_CART) return createBrokenCartEvent();
+  if (type === EVENT_CATTLE_CROSSING) return createCattleCrossingEvent();
+  if (type === EVENT_VILLAGE_CROWD) return createVillageCrowdEvent();
+  if (type === EVENT_ROAD_REPAIR) return createRoadRepairEvent();
+  if (type === EVENT_MARKET_SPILL) return createMarketSpillEvent();
+  return createWaterPuddleEvent();
+}
+
 function createDestinationMarker() {
   const marker = new THREE.Group();
   marker.name = "VillageDestination";
@@ -291,6 +469,8 @@ export function createRoadGameplay(scene) {
   group.name = "RoadGameplay";
   const hazardGroup = new THREE.Group();
   hazardGroup.name = "ProceduralRouteHazards";
+  const eventGroup = new THREE.Group();
+  eventGroup.name = "ProceduralRouteEvents";
   const missionGroup = new THREE.Group();
   missionGroup.name = "MissionRouteMarkers";
   const destinationMarker = createDestinationMarker();
@@ -304,7 +484,7 @@ export function createRoadGameplay(scene) {
   for (let index = 0; index < checkpointMarkers.length; index += 1) {
     missionGroup.add(checkpointMarkers[index]);
   }
-  group.add(missionGroup, hazardGroup);
+  group.add(missionGroup, hazardGroup, eventGroup);
 
   const obstacles = new Array(MAX_ROUTE_HAZARDS);
   for (let index = 0; index < MAX_ROUTE_HAZARDS; index += 1) {
@@ -345,6 +525,51 @@ export function createRoadGameplay(scene) {
     };
   }
   const hazardRouteSample = {};
+
+  const events = new Array(MAX_ROUTE_EVENTS);
+  for (let index = 0; index < MAX_ROUTE_EVENTS; index += 1) {
+    const eventRoot = new THREE.Group();
+    eventRoot.name = `RouteEvent${index + 1}`;
+    eventRoot.visible = false;
+    const variants = new Array(EVENT_TYPES.length);
+    for (
+      let typeIndex = 0;
+      typeIndex < EVENT_TYPES.length;
+      typeIndex += 1
+    ) {
+      const visual = createEventVisual(EVENT_TYPES[typeIndex]);
+      visual.visible = false;
+      eventRoot.add(visual);
+      variants[typeIndex] = visual;
+    }
+    const collisionParts = new Array(4);
+    for (let partIndex = 0; partIndex < collisionParts.length; partIndex += 1) {
+      collisionParts[partIndex] = {
+        active: false,
+        x: 10000,
+        z: 10000,
+        radius: 0,
+      };
+    }
+    eventGroup.add(eventRoot);
+    events[index] = {
+      id: 0,
+      type: EVENT_BROKEN_BULLOCK_CART,
+      routeDistance: 0,
+      laneOffset: 0,
+      length: 0,
+      difficulty: 1,
+      chunkIndex: 0,
+      theme: "None",
+      active: false,
+      hit: false,
+      severity: 0,
+      group: eventRoot,
+      variants,
+      collisionParts,
+    };
+  }
+  const eventRouteSample = {};
   scene.add(group);
 
   function configureHazards(count, routeSampler, difficulty) {
@@ -423,6 +648,133 @@ export function createRoadGameplay(scene) {
     }
   }
 
+  function configureEvents(count, routeSampler, difficulty) {
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index];
+      const active = index < count && event.active;
+      event.group.visible = active;
+      event.hit = false;
+      for (
+        let partIndex = 0;
+        partIndex < event.collisionParts.length;
+        partIndex += 1
+      ) {
+        const part = event.collisionParts[partIndex];
+        part.active = false;
+        part.x = 10000;
+        part.z = 10000;
+        part.radius = 0;
+      }
+      for (
+        let variantIndex = 0;
+        variantIndex < event.variants.length;
+        variantIndex += 1
+      ) {
+        event.variants[variantIndex].visible = (
+          active && EVENT_TYPES[variantIndex] === event.type
+        );
+      }
+      if (!active) continue;
+
+      routeSampler(event.routeDistance, difficulty, eventRouteSample);
+      const baseX = (
+        eventRouteSample.centerX
+        + eventRouteSample.normalX * event.laneOffset
+      );
+      const baseZ = (
+        eventRouteSample.centerZ
+        + eventRouteSample.normalZ * event.laneOffset
+      );
+      event.group.position.set(
+        baseX,
+        eventRouteSample.centerY + 0.01,
+        baseZ,
+      );
+      event.group.rotation.set(
+        0,
+        Math.atan2(
+          eventRouteSample.tangentX,
+          eventRouteSample.tangentZ,
+        ),
+        0,
+      );
+
+      let partCount = 1;
+      let severity = 0.76;
+      if (event.type === EVENT_CATTLE_CROSSING) {
+        partCount = 3;
+        severity = 0.66;
+      } else if (event.type === EVENT_VILLAGE_CROWD) {
+        partCount = 2;
+        severity = 0.48;
+      } else if (event.type === EVENT_ROAD_REPAIR) {
+        partCount = 2;
+        severity = 0.72;
+      } else if (event.type === EVENT_MARKET_SPILL) {
+        partCount = 3;
+        severity = 0.6;
+      } else if (event.type === EVENT_WATER_PUDDLE) {
+        partCount = 0;
+        severity = 0;
+      }
+      event.severity = severity;
+
+      for (let partIndex = 0; partIndex < partCount; partIndex += 1) {
+        let localX = 0;
+        let localZ = 0;
+        let radius = 1.05;
+        if (event.type === EVENT_CATTLE_CROSSING) {
+          localX = (partIndex - 1) * 2.3;
+          localZ = (partIndex - 1) * 1.8;
+          radius = 0.82;
+        } else if (event.type === EVENT_VILLAGE_CROWD) {
+          localX = (partIndex - 0.5) * 1.05;
+          localZ = (partIndex - 0.5) * 1.1;
+          radius = 0.72;
+        } else if (event.type === EVENT_ROAD_REPAIR) {
+          localZ = (partIndex === 0 ? -1 : 1) * 2.1;
+          radius = 1.65;
+        } else if (event.type === EVENT_MARKET_SPILL) {
+          localX = partIndex === 0 ? -0.8 : partIndex === 1 ? 0.85 : -0.15;
+          localZ = partIndex === 0 ? -1.2 : partIndex === 1 ? 0.25 : 1.55;
+          radius = partIndex === 1 ? 0.5 : 0.66;
+        } else if (event.type === EVENT_BROKEN_BULLOCK_CART) {
+          radius = 1.35;
+        }
+        const part = event.collisionParts[partIndex];
+        const lateralOffset = event.laneOffset + localX;
+        part.active = true;
+        part.x = (
+          eventRouteSample.centerX
+          + eventRouteSample.normalX * lateralOffset
+          + eventRouteSample.tangentX * localZ
+        );
+        part.z = (
+          eventRouteSample.centerZ
+          + eventRouteSample.normalZ * lateralOffset
+          + eventRouteSample.tangentZ * localZ
+        );
+        part.radius = radius;
+      }
+    }
+  }
+
+  function resetEvents() {
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index];
+      event.active = false;
+      event.hit = false;
+      event.group.visible = false;
+      for (
+        let partIndex = 0;
+        partIndex < event.collisionParts.length;
+        partIndex += 1
+      ) {
+        event.collisionParts[partIndex].active = false;
+      }
+    }
+  }
+
   function placeMarker(marker, sample, yOffset, widthScale = 1) {
     marker.position.set(
       sample.centerX,
@@ -487,6 +839,34 @@ export function createRoadGameplay(scene) {
         };
       }
     }
+    for (const event of events) {
+      if (!event.active || event.hit) continue;
+      for (
+        let partIndex = 0;
+        partIndex < event.collisionParts.length;
+        partIndex += 1
+      ) {
+        const part = event.collisionParts[partIndex];
+        if (!part.active) continue;
+        const dx = part.x - position.x;
+        const dz = part.z - position.z;
+        const lateral = dx * sideX + dz * sideZ;
+        const forward = dx * forwardX + dz * forwardZ;
+        const width = 1.35 + part.radius;
+        if (
+          Math.abs(lateral) <= width
+          && forward >= -3.25 - part.radius
+          && forward <= 4.8 + part.radius
+        ) {
+          event.hit = true;
+          return {
+            type: event.type,
+            severity: event.severity,
+            side: THREE.MathUtils.clamp(lateral / width, -1, 1),
+          };
+        }
+      }
+    }
     return null;
   }
 
@@ -511,6 +891,7 @@ export function createRoadGameplay(scene) {
 
   function reset() {
     resetHazards();
+    resetEvents();
     resetMissionMarkers();
   }
 
@@ -518,7 +899,9 @@ export function createRoadGameplay(scene) {
     group,
     missionGroup,
     hazardGroup,
+    eventGroup,
     hazards: obstacles,
+    events,
     destinationMarker,
     checkpointMarkers,
     checkImpact,
@@ -528,7 +911,9 @@ export function createRoadGameplay(scene) {
     setCheckpointTriggered,
     resetMissionMarkers,
     configureHazards,
+    configureEvents,
     resetHazards,
+    resetEvents,
     reset,
   };
 }

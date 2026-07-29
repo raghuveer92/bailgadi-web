@@ -17,6 +17,7 @@ import { createWorld } from "./world.js";
 
 const START_X = 0;
 const MISSION_END_Z = 480;
+const CART_ROAD_CLEARANCE = 0.012;
 const CHECKPOINTS = [400, 300, 200, 100];
 const MISSIONS = Object.freeze([
   Object.freeze({
@@ -121,6 +122,16 @@ const movementDebug = {
   poolUsage: document.querySelector("#world-debug-pool"),
   ambientEvent: document.querySelector("#world-debug-event"),
   averageNPCUpdate: document.querySelector("#world-debug-update-time"),
+  currentChunk: document.querySelector("#procedural-debug-chunk"),
+  loadedChunks: document.querySelector("#procedural-debug-loaded"),
+  chunkPoolSize: document.querySelector("#procedural-debug-pool"),
+  currentTheme: document.querySelector("#procedural-debug-theme"),
+  currentVillage: document.querySelector("#procedural-debug-village"),
+  landmark: document.querySelector("#procedural-debug-landmark"),
+  objectsSpawned: document.querySelector("#procedural-debug-objects"),
+  lodLevel: document.querySelector("#procedural-debug-lod"),
+  drawCalls: document.querySelector("#procedural-debug-draw-calls"),
+  fps: document.querySelector("#procedural-debug-fps"),
 };
 
 const scene = new THREE.Scene();
@@ -139,7 +150,13 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 root.appendChild(renderer.domElement);
 
-const { obstacles, sun, villageLife } = createWorld(scene);
+const {
+  obstacles,
+  sun,
+  villageLife,
+  worldGenerator,
+  sampleRoad,
+} = createWorld(scene);
 const roadGameplay = createRoadGameplay(scene);
 const { group: cart, animationParts } = createBullockCart();
 cart.position.set(START_X, 0.05, MISSION_END_Z - MISSIONS[0].distance);
@@ -198,6 +215,12 @@ const sideVector = new THREE.Vector3();
 const cameraOffset = new THREE.Vector3();
 const previousPosition = cart.position.clone();
 const roadSurface = { roughness: 0, roll: 0 };
+const currentRoadSample = {};
+const aheadRoadSample = {};
+const behindRoadSample = {};
+const aheadRoadPosition = { x: 0, z: 0 };
+const behindRoadPosition = { x: 0, z: 0 };
+const candidateRoadPosition = { x: 0, z: 0 };
 
 const state = {
   started: false,
@@ -215,6 +238,10 @@ const state = {
   stabilityHudBucket: -1,
   cargoImpact: 0,
   cargoCameraFeedback: 0,
+  lateralOffset: 0,
+  steeringOffset: 0,
+  roadHeading: 0,
+  terrainPitch: 0,
   missionIndex: 0,
   nextMissionIndex: 1,
   mission: MISSIONS[0],
@@ -231,6 +258,13 @@ const tuning = {
   accelerationResponse: 2.4,
   brakingResponse: 3.1,
   steering: 0.52,
+  maxSteeringOffset: 0.38,
+  steeringReturn: 2.1,
+  headingResponse: 5.2,
+  roadLateralLimit: 22,
+  terrainHeightResponse: 5.5,
+  terrainPitchResponse: 4.2,
+  terrainSampleDistance: 4.5,
   cameraDistance: 11.8,
   cameraSpeedPullback: 2,
   cameraHeight: 6.35,
@@ -257,8 +291,79 @@ function damp(current, target, smoothing, delta) {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-smoothing * delta));
 }
 
+function wrappedAngleDelta(from, to) {
+  return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+
+function dampAngle(current, target, smoothing, delta) {
+  return current + wrappedAngleDelta(current, target) * (1 - Math.exp(-smoothing * delta));
+}
+
 function missionStartZ() {
   return MISSION_END_Z - state.mission.distance;
+}
+
+function updateCurrentRoadSample() {
+  sampleRoad(cart.position, state.mission.level, currentRoadSample);
+  state.roadHeading = Math.atan2(
+    currentRoadSample.tangentX,
+    currentRoadSample.tangentZ,
+  );
+}
+
+function updateRoadSamples() {
+  updateCurrentRoadSample();
+  const sampleDistance = tuning.terrainSampleDistance;
+  aheadRoadPosition.x = cart.position.x
+    + currentRoadSample.tangentX * sampleDistance;
+  aheadRoadPosition.z = cart.position.z
+    + currentRoadSample.tangentZ * sampleDistance;
+  behindRoadPosition.x = cart.position.x
+    - currentRoadSample.tangentX * sampleDistance;
+  behindRoadPosition.z = cart.position.z
+    - currentRoadSample.tangentZ * sampleDistance;
+  sampleRoad(aheadRoadPosition, state.mission.level, aheadRoadSample);
+  sampleRoad(behindRoadPosition, state.mission.level, behindRoadSample);
+}
+
+function updateTerrainPose(delta, snap = false) {
+  const targetY = currentRoadSample.height + CART_ROAD_CLEARANCE;
+  const sampleDeltaX = aheadRoadSample.centerX - behindRoadSample.centerX;
+  const sampleDeltaZ = aheadRoadPosition.z - behindRoadPosition.z;
+  const sampleDistance = Math.hypot(sampleDeltaX, sampleDeltaZ);
+  const targetPitch = -Math.atan2(
+    aheadRoadSample.height - behindRoadSample.height,
+    sampleDistance,
+  );
+  if (snap) {
+    cart.position.y = targetY;
+    state.terrainPitch = targetPitch;
+  } else {
+    cart.position.y = damp(
+      cart.position.y,
+      targetY,
+      tuning.terrainHeightResponse,
+      delta,
+    );
+    state.terrainPitch = damp(
+      state.terrainPitch,
+      targetPitch,
+      tuning.terrainPitchResponse,
+      delta,
+    );
+  }
+  cart.rotation.x = state.terrainPitch;
+}
+
+function initializeRoadPose() {
+  updateRoadSamples();
+  state.lateralOffset = (
+    cart.position.x - currentRoadSample.centerX
+  ) * currentRoadSample.tangentZ;
+  state.steeringOffset = 0;
+  state.heading = state.roadHeading;
+  cart.rotation.y = state.heading;
+  updateTerrainPose(0, true);
 }
 
 function formatMissionTime(seconds) {
@@ -418,13 +523,52 @@ function updateMovement(delta) {
   const speedRatio = Math.min(Math.abs(state.speed) / tuning.maxForward, 1);
   if (steerInput && Math.abs(state.speed) > 0.04) {
     const direction = state.speed >= 0 ? 1 : -1;
-    state.heading += steerInput * tuning.steering * (0.35 + speedRatio * 0.65) * direction * delta;
+    state.steeringOffset += (
+      steerInput
+      * tuning.steering
+      * (0.35 + speedRatio * 0.65)
+      * direction
+      * delta
+    );
+  } else if (!steerInput) {
+    state.steeringOffset = damp(
+      state.steeringOffset,
+      0,
+      tuning.steeringReturn,
+      delta,
+    );
   }
+  state.steeringOffset = THREE.MathUtils.clamp(
+    state.steeringOffset,
+    -tuning.maxSteeringOffset,
+    tuning.maxSteeringOffset,
+  );
 
+  updateCurrentRoadSample();
+  state.heading = dampAngle(
+    state.heading,
+    state.roadHeading + state.steeringOffset,
+    tuning.headingResponse,
+    delta,
+  );
   headingVector.set(Math.sin(state.heading), 0, Math.cos(state.heading));
   const moveDistance = state.speed * delta;
-  const nextX = cart.position.x + headingVector.x * moveDistance;
-  const nextZ = cart.position.z + headingVector.z * moveDistance;
+  const unconstrainedX = cart.position.x + headingVector.x * moveDistance;
+  const nextZ = THREE.MathUtils.clamp(
+    cart.position.z + headingVector.z * moveDistance,
+    -345,
+    495,
+  );
+  candidateRoadPosition.x = unconstrainedX;
+  candidateRoadPosition.z = nextZ;
+  sampleRoad(candidateRoadPosition, state.mission.level, aheadRoadSample);
+  const candidateLateralOffset = THREE.MathUtils.clamp(
+    (unconstrainedX - aheadRoadSample.centerX) * aheadRoadSample.tangentZ,
+    -tuning.roadLateralLimit,
+    tuning.roadLateralLimit,
+  );
+  const nextX = aheadRoadSample.centerX
+    + candidateLateralOffset / Math.max(aheadRoadSample.tangentZ, 0.001);
 
   if (sceneryObstacleHit(nextX, nextZ)) {
     state.speed *= -0.12;
@@ -432,13 +576,15 @@ function updateMovement(delta) {
     state.collisionStrength = 0.65;
     state.cargoImpact = Math.max(state.cargoImpact, 0.65);
   } else {
-    cart.position.x = THREE.MathUtils.clamp(nextX, -125, 125);
-    cart.position.z = THREE.MathUtils.clamp(nextZ, -345, 495);
+    cart.position.x = nextX;
+    cart.position.z = nextZ;
+    state.lateralOffset = candidateLateralOffset;
   }
 
   cart.rotation.y = state.heading;
   cart.rotation.z = damp(cart.rotation.z, -steerInput * speedRatio * 0.035, 5, delta);
-  cart.position.y = 0.05;
+  updateRoadSamples();
+  updateTerrainPose(delta);
 
   const travelledDistance =
     (cart.position.x - oldX) * headingVector.x
@@ -614,6 +760,26 @@ function updateMovementDebug(delta) {
   movementDebug.ambientEvent.textContent = villageLife.debug.currentAmbientEvent;
   movementDebug.averageNPCUpdate.textContent =
     `${villageLife.debug.averageNPCUpdateTime.toFixed(2)} ms`;
+  movementDebug.currentChunk.textContent =
+    `${worldGenerator.debug.currentChunk} · ${worldGenerator.debug.roadLayout}`;
+  movementDebug.loadedChunks.textContent =
+    String(worldGenerator.debug.loadedChunks);
+  movementDebug.chunkPoolSize.textContent =
+    String(worldGenerator.debug.chunkPoolSize);
+  movementDebug.currentTheme.textContent =
+    worldGenerator.debug.currentTheme;
+  movementDebug.currentVillage.textContent =
+    worldGenerator.debug.currentVillage;
+  movementDebug.landmark.textContent =
+    worldGenerator.debug.landmark;
+  movementDebug.objectsSpawned.textContent =
+    String(worldGenerator.debug.objectsSpawned);
+  movementDebug.lodLevel.textContent =
+    `LOD ${worldGenerator.debug.lodLevel}`;
+  movementDebug.drawCalls.textContent =
+    String(worldGenerator.debug.drawCalls);
+  movementDebug.fps.textContent =
+    worldGenerator.debug.fps.toFixed(0);
 }
 
 function updateHud() {
@@ -681,6 +847,18 @@ function updateHud() {
       input: controls.getCombinedState(),
       voiceEnabled: voiceControls.enabled,
       environment: villageLife.counts,
+      proceduralWorld: worldGenerator.debug,
+      proceduralRoad: {
+        roadCenterX: Number(currentRoadSample.centerX.toFixed(3)),
+        lateralOffset: Number(state.lateralOffset.toFixed(3)),
+        roadHeading: Number(state.roadHeading.toFixed(3)),
+        cartHeading: Number(state.heading.toFixed(3)),
+        roadHeight: Number(currentRoadSample.height.toFixed(4)),
+        cartY: Number(cart.position.y.toFixed(4)),
+        terrainPitch: Number(state.terrainPitch.toFixed(5)),
+        normalizedOffset: Number(currentRoadSample.normalizedOffset.toFixed(3)),
+        chunkIndex: currentRoadSample.chunkIndex,
+      },
     });
   }
 }
@@ -689,6 +867,13 @@ function animate() {
   const delta = Math.min(clock.getDelta(), 0.05);
   state.elapsed += delta;
   if (state.started) updateMovement(delta);
+  worldGenerator.update(
+    cart.position,
+    state.mission.level,
+    delta,
+    renderer.info.render.calls,
+  );
+  if (import.meta.env.DEV && !state.started) updateRoadSamples();
   villageLife.update({
     cartPosition: cart.position,
     cartSpeed: state.speed,
@@ -704,6 +889,7 @@ function animate() {
 }
 
 function startGame() {
+  initializeRoadPose();
   state.started = true;
   state.journeyStatus = "playing";
   cargoPhysics.reset(state.mission.cargoType, state.mission.level);
@@ -748,10 +934,23 @@ function replayGame() {
   state.stabilityHudBucket = -1;
   state.cargoImpact = 0;
   state.cargoCameraFeedback = 0;
+  state.lateralOffset = 0;
+  state.steeringOffset = 0;
+  state.roadHeading = 0;
+  state.terrainPitch = 0;
   state.journeyStatus = "playing";
   state.passedCheckpoints.clear();
   cart.position.set(START_X, 0.05, missionStartZ());
   cart.rotation.set(0, 0, 0);
+  worldGenerator.reseed();
+  worldGenerator.previousPlayerZ = cart.position.z;
+  worldGenerator.update(
+    cart.position,
+    state.mission.level,
+    1 / 60,
+    renderer.info.render.calls,
+  );
+  initializeRoadPose();
   previousPosition.copy(cart.position);
   camera.position.set(0, tuning.cameraHeight + 0.8, missionStartZ() - tuning.cameraDistance);
   camera.lookAt(0, 1.4, missionStartZ() + 4.4);
@@ -791,6 +990,21 @@ window.__bailgadi = {
     cameraPosition: camera.position.toArray(),
     controls: controls.getCombinedState(),
     voiceEnabled: voiceControls.enabled,
+    proceduralRoad: import.meta.env.DEV
+      ? {
+        roadCenterX: currentRoadSample.centerX,
+        lateralOffset: state.lateralOffset,
+        roadHeading: state.roadHeading,
+        cartHeading: state.heading,
+        roadHeight: currentRoadSample.height,
+        cartY: cart.position.y,
+        terrainPitch: state.terrainPitch,
+        normalizedOffset: currentRoadSample.normalizedOffset,
+        chunkIndex: currentRoadSample.chunkIndex,
+        roadWidth: currentRoadSample.width,
+        isOnRoad: currentRoadSample.isOnRoad,
+      }
+      : undefined,
   }),
   start: startGame,
 };

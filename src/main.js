@@ -18,6 +18,19 @@ import { createWorld } from "./world.js";
 const START_X = 0;
 const MISSION_END_Z = 480;
 const CART_ROAD_CLEARANCE = 0.012;
+const ROAD_ZONE_CENTER = "CENTER";
+const ROAD_ZONE_EDGE = "EDGE";
+const ROAD_ZONE_OFF_ROAD = "OFF_ROAD";
+const ROAD_ZONE_FAR_OFF_ROAD = "FAR_OFF_ROAD";
+const ROAD_CENTER_RATIO = 0.65;
+const ROAD_SHOULDER_WIDTH = 3.5;
+const ROAD_MIN_SHOULDER_WIDTH = 3;
+const ROAD_FAR_RANGE = 8;
+const ROAD_MINIMUM_LATERAL_LIMIT = 15;
+const ROAD_LIMIT_WIDTH_RESPONSE = 2.4;
+const ROAD_EXCESS_RETURN_RESPONSE = 1.2;
+const ROAD_OFF_ROAD_RESISTANCE_MIN = 0.025;
+const ROAD_OFF_ROAD_RESISTANCE_MAX = 0.08;
 const CHECKPOINTS = [400, 300, 200, 100];
 const MISSIONS = Object.freeze([
   Object.freeze({
@@ -221,6 +234,25 @@ const behindRoadSample = {};
 const aheadRoadPosition = { x: 0, z: 0 };
 const behindRoadPosition = { x: 0, z: 0 };
 const candidateRoadPosition = { x: 0, z: 0 };
+const roadState = {
+  zone: ROAD_ZONE_CENTER,
+  lateralOffset: 0,
+  absoluteOffset: 0,
+  normalizedOffset: 0,
+  roadHalfWidth: 0,
+  shoulderWidth: ROAD_SHOULDER_WIDTH,
+  distanceBeyondRoad: 0,
+  isOnRoad: true,
+  isNearEdge: false,
+  isOffRoad: false,
+  isFarOffRoad: false,
+  maximumAllowedLateralOffset: ROAD_MINIMUM_LATERAL_LIMIT,
+  boundaryResistance: 0,
+  enteredEdge: false,
+  enteredOffRoad: false,
+  enteredFarOffRoad: false,
+  returnedToRoad: false,
+};
 
 const state = {
   started: false,
@@ -261,7 +293,6 @@ const tuning = {
   maxSteeringOffset: 0.38,
   steeringReturn: 2.1,
   headingResponse: 5.2,
-  roadLateralLimit: 22,
   terrainHeightResponse: 5.5,
   terrainPitchResponse: 4.2,
   terrainSampleDistance: 4.5,
@@ -297,6 +328,11 @@ function wrappedAngleDelta(from, to) {
 
 function dampAngle(current, target, smoothing, delta) {
   return current + wrappedAngleDelta(current, target) * (1 - Math.exp(-smoothing * delta));
+}
+
+function smoothstep01(value) {
+  const clamped = THREE.MathUtils.clamp(value, 0, 1);
+  return clamped * clamped * (3 - 2 * clamped);
 }
 
 function missionStartZ() {
@@ -364,6 +400,71 @@ function initializeRoadPose() {
   state.heading = state.roadHeading;
   cart.rotation.y = state.heading;
   updateTerrainPose(0, true);
+  updateRoadState(0, true);
+}
+
+function updateRoadState(delta, resetTransitions = false) {
+  const previousZone = roadState.zone;
+  const lateralOffset = state.lateralOffset;
+  const absoluteOffset = Math.abs(lateralOffset);
+  const roadHalfWidth = currentRoadSample.width * 0.5;
+  const shoulderWidth = Math.max(
+    ROAD_SHOULDER_WIDTH,
+    ROAD_MIN_SHOULDER_WIDTH,
+  );
+  const farOffRoadThreshold = roadHalfWidth + shoulderWidth;
+  const targetMaximumOffset = Math.max(
+    ROAD_MINIMUM_LATERAL_LIMIT,
+    farOffRoadThreshold + ROAD_FAR_RANGE,
+  );
+  let zone = ROAD_ZONE_CENTER;
+  if (absoluteOffset > farOffRoadThreshold) {
+    zone = ROAD_ZONE_FAR_OFF_ROAD;
+  } else if (absoluteOffset > roadHalfWidth) {
+    zone = ROAD_ZONE_OFF_ROAD;
+  } else if (absoluteOffset > roadHalfWidth * ROAD_CENTER_RATIO) {
+    zone = ROAD_ZONE_EDGE;
+  }
+
+  roadState.zone = zone;
+  roadState.lateralOffset = lateralOffset;
+  roadState.absoluteOffset = absoluteOffset;
+  roadState.normalizedOffset = roadHalfWidth > 0
+    ? lateralOffset / roadHalfWidth
+    : 0;
+  roadState.roadHalfWidth = roadHalfWidth;
+  roadState.shoulderWidth = shoulderWidth;
+  roadState.distanceBeyondRoad = Math.max(0, absoluteOffset - roadHalfWidth);
+  roadState.isOnRoad = zone === ROAD_ZONE_CENTER || zone === ROAD_ZONE_EDGE;
+  roadState.isNearEdge = zone === ROAD_ZONE_EDGE;
+  roadState.isOffRoad = (
+    zone === ROAD_ZONE_OFF_ROAD
+    || zone === ROAD_ZONE_FAR_OFF_ROAD
+  );
+  roadState.isFarOffRoad = zone === ROAD_ZONE_FAR_OFF_ROAD;
+  roadState.maximumAllowedLateralOffset = resetTransitions
+    ? targetMaximumOffset
+    : damp(
+      roadState.maximumAllowedLateralOffset,
+      targetMaximumOffset,
+      ROAD_LIMIT_WIDTH_RESPONSE,
+      delta,
+    );
+  roadState.enteredEdge = !resetTransitions
+    && zone === ROAD_ZONE_EDGE
+    && previousZone !== ROAD_ZONE_EDGE;
+  roadState.enteredOffRoad = !resetTransitions
+    && zone === ROAD_ZONE_OFF_ROAD
+    && previousZone !== ROAD_ZONE_OFF_ROAD;
+  roadState.enteredFarOffRoad = !resetTransitions
+    && zone === ROAD_ZONE_FAR_OFF_ROAD
+    && previousZone !== ROAD_ZONE_FAR_OFF_ROAD;
+  roadState.returnedToRoad = !resetTransitions
+    && (zone === ROAD_ZONE_CENTER || zone === ROAD_ZONE_EDGE)
+    && (
+      previousZone === ROAD_ZONE_OFF_ROAD
+      || previousZone === ROAD_ZONE_FAR_OFF_ROAD
+    );
 }
 
 function formatMissionTime(seconds) {
@@ -562,11 +663,59 @@ function updateMovement(delta) {
   candidateRoadPosition.x = unconstrainedX;
   candidateRoadPosition.z = nextZ;
   sampleRoad(candidateRoadPosition, state.mission.level, aheadRoadSample);
-  const candidateLateralOffset = THREE.MathUtils.clamp(
-    (unconstrainedX - aheadRoadSample.centerX) * aheadRoadSample.tangentZ,
-    -tuning.roadLateralLimit,
-    tuning.roadLateralLimit,
+  const rawCandidateLateralOffset = (
+    unconstrainedX - aheadRoadSample.centerX
+  ) * aheadRoadSample.tangentZ;
+  const candidateRoadHalfWidth = aheadRoadSample.width * 0.5;
+  const candidateShoulderWidth = Math.max(
+    ROAD_SHOULDER_WIDTH,
+    ROAD_MIN_SHOULDER_WIDTH,
   );
+  const candidateFarThreshold = candidateRoadHalfWidth + candidateShoulderWidth;
+  const candidateAbsoluteOffset = Math.abs(rawCandidateLateralOffset);
+  let boundaryResistance = 0;
+  if (candidateAbsoluteOffset > candidateFarThreshold) {
+    const farProgress = (
+      candidateAbsoluteOffset - candidateFarThreshold
+    ) / Math.max(
+      roadState.maximumAllowedLateralOffset - candidateFarThreshold,
+      0.001,
+    );
+    boundaryResistance = (
+      ROAD_OFF_ROAD_RESISTANCE_MAX
+      + (1 - ROAD_OFF_ROAD_RESISTANCE_MAX) * smoothstep01(farProgress)
+    );
+  } else if (candidateAbsoluteOffset > candidateRoadHalfWidth) {
+    const shoulderProgress = (
+      candidateAbsoluteOffset - candidateRoadHalfWidth
+    ) / candidateShoulderWidth;
+    boundaryResistance = (
+      ROAD_OFF_ROAD_RESISTANCE_MIN
+      + (
+        ROAD_OFF_ROAD_RESISTANCE_MAX
+        - ROAD_OFF_ROAD_RESISTANCE_MIN
+      ) * smoothstep01(shoulderProgress)
+    );
+  }
+  const lateralDelta = rawCandidateLateralOffset - state.lateralOffset;
+  const movingOutward = (
+    Math.abs(rawCandidateLateralOffset) > Math.abs(state.lateralOffset)
+  );
+  let candidateLateralOffset = movingOutward
+    ? state.lateralOffset + lateralDelta * (1 - boundaryResistance)
+    : rawCandidateLateralOffset;
+  const excessOffset = (
+    Math.abs(candidateLateralOffset)
+    - roadState.maximumAllowedLateralOffset
+  );
+  if (excessOffset > 0) {
+    candidateLateralOffset -= (
+      Math.sign(candidateLateralOffset)
+      * excessOffset
+      * (1 - Math.exp(-ROAD_EXCESS_RETURN_RESPONSE * delta))
+    );
+  }
+  roadState.boundaryResistance = movingOutward ? boundaryResistance : 0;
   const nextX = aheadRoadSample.centerX
     + candidateLateralOffset / Math.max(aheadRoadSample.tangentZ, 0.001);
 
@@ -585,6 +734,7 @@ function updateMovement(delta) {
   cart.rotation.z = damp(cart.rotation.z, -steerInput * speedRatio * 0.035, 5, delta);
   updateRoadSamples();
   updateTerrainPose(delta);
+  updateRoadState(delta);
 
   const travelledDistance =
     (cart.position.x - oldX) * headingVector.x
@@ -850,13 +1000,30 @@ function updateHud() {
       proceduralWorld: worldGenerator.debug,
       proceduralRoad: {
         roadCenterX: Number(currentRoadSample.centerX.toFixed(3)),
-        lateralOffset: Number(state.lateralOffset.toFixed(3)),
+        zone: roadState.zone,
+        lateralOffset: Number(roadState.lateralOffset.toFixed(3)),
+        absoluteOffset: Number(roadState.absoluteOffset.toFixed(3)),
         roadHeading: Number(state.roadHeading.toFixed(3)),
         cartHeading: Number(state.heading.toFixed(3)),
         roadHeight: Number(currentRoadSample.height.toFixed(4)),
         cartY: Number(cart.position.y.toFixed(4)),
         terrainPitch: Number(state.terrainPitch.toFixed(5)),
-        normalizedOffset: Number(currentRoadSample.normalizedOffset.toFixed(3)),
+        normalizedOffset: Number(roadState.normalizedOffset.toFixed(3)),
+        roadHalfWidth: Number(roadState.roadHalfWidth.toFixed(3)),
+        shoulderWidth: Number(roadState.shoulderWidth.toFixed(3)),
+        distanceBeyondRoad: Number(roadState.distanceBeyondRoad.toFixed(3)),
+        isOnRoad: roadState.isOnRoad,
+        isNearEdge: roadState.isNearEdge,
+        isOffRoad: roadState.isOffRoad,
+        isFarOffRoad: roadState.isFarOffRoad,
+        maximumAllowedLateralOffset: Number(
+          roadState.maximumAllowedLateralOffset.toFixed(3),
+        ),
+        boundaryResistance: Number(roadState.boundaryResistance.toFixed(3)),
+        enteredEdge: roadState.enteredEdge,
+        enteredOffRoad: roadState.enteredOffRoad,
+        enteredFarOffRoad: roadState.enteredFarOffRoad,
+        returnedToRoad: roadState.returnedToRoad,
         chunkIndex: currentRoadSample.chunkIndex,
       },
     });
@@ -874,6 +1041,7 @@ function animate() {
     renderer.info.render.calls,
   );
   if (import.meta.env.DEV && !state.started) updateRoadSamples();
+  if (import.meta.env.DEV && !state.started) updateRoadState(0, true);
   villageLife.update({
     cartPosition: cart.position,
     cartSpeed: state.speed,
@@ -993,16 +1161,30 @@ window.__bailgadi = {
     proceduralRoad: import.meta.env.DEV
       ? {
         roadCenterX: currentRoadSample.centerX,
-        lateralOffset: state.lateralOffset,
+        zone: roadState.zone,
+        lateralOffset: roadState.lateralOffset,
+        absoluteOffset: roadState.absoluteOffset,
         roadHeading: state.roadHeading,
         cartHeading: state.heading,
         roadHeight: currentRoadSample.height,
         cartY: cart.position.y,
         terrainPitch: state.terrainPitch,
-        normalizedOffset: currentRoadSample.normalizedOffset,
+        normalizedOffset: roadState.normalizedOffset,
+        roadHalfWidth: roadState.roadHalfWidth,
+        shoulderWidth: roadState.shoulderWidth,
+        distanceBeyondRoad: roadState.distanceBeyondRoad,
+        isOnRoad: roadState.isOnRoad,
+        isNearEdge: roadState.isNearEdge,
+        isOffRoad: roadState.isOffRoad,
+        isFarOffRoad: roadState.isFarOffRoad,
+        maximumAllowedLateralOffset: roadState.maximumAllowedLateralOffset,
+        boundaryResistance: roadState.boundaryResistance,
+        enteredEdge: roadState.enteredEdge,
+        enteredOffRoad: roadState.enteredOffRoad,
+        enteredFarOffRoad: roadState.enteredFarOffRoad,
+        returnedToRoad: roadState.returnedToRoad,
         chunkIndex: currentRoadSample.chunkIndex,
         roadWidth: currentRoadSample.width,
-        isOnRoad: currentRoadSample.isOnRoad,
       }
       : undefined,
   }),

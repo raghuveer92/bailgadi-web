@@ -3,8 +3,15 @@ import * as THREE from "three";
 export const CHUNK_LENGTH = 80;
 export const DEFAULT_ACTIVE_CHUNKS = 7;
 export const DEFAULT_CHUNK_POOL_SIZE = 9;
+export const SURFACE_ROAD = "ROAD";
+export const SURFACE_DIRT = "DIRT";
+export const SURFACE_GRASS = "GRASS";
+export const SURFACE_GRAVEL = "GRAVEL";
+export const SURFACE_MUD = "MUD";
 
 const ROAD_SEGMENTS = 24;
+const SURFACE_CENTER_RATIO = 0.65;
+const SURFACE_SHOULDER_WIDTH = 3.5;
 const GROUND_SEGMENTS = 8;
 const MAX_TREES = 26;
 const MAX_CROPS = 110;
@@ -206,6 +213,36 @@ function setTransform(scratch, x, y, z, rotationY, scaleX, scaleY, scaleZ) {
 
 function themeIndexFor(seed, chunkIndex) {
   return hashUint(seed, chunkIndex, 91) % THEME_DEFINITIONS.length;
+}
+
+function edgeSurfaceTypeFor(themeIndex) {
+  return themeIndex >= 8 ? SURFACE_ROAD : SURFACE_DIRT;
+}
+
+function offRoadSurfaceTypeFor(themeIndex) {
+  return themeIndex === 7 || themeIndex >= 8
+    ? SURFACE_GRAVEL
+    : SURFACE_GRASS;
+}
+
+function farOffRoadSurfaceTypeFor(themeIndex) {
+  return themeIndex === 1 || themeIndex === 6 || themeIndex === 7
+    ? SURFACE_MUD
+    : SURFACE_GRASS;
+}
+
+function surfaceTypeAt(themeIndex, distanceFromCenter, width) {
+  const roadHalfWidth = width * 0.5;
+  if (distanceFromCenter <= roadHalfWidth * SURFACE_CENTER_RATIO) {
+    return SURFACE_ROAD;
+  }
+  if (distanceFromCenter <= roadHalfWidth) {
+    return edgeSurfaceTypeFor(themeIndex);
+  }
+  if (distanceFromCenter <= roadHalfWidth + SURFACE_SHOULDER_WIDTH) {
+    return offRoadSurfaceTypeFor(themeIndex);
+  }
+  return farOffRoadSurfaceTypeFor(themeIndex);
 }
 
 function roadLayoutIndexFor(seed, chunkIndex, difficulty) {
@@ -545,6 +582,7 @@ export class RoadGenerator {
     const tangentLength = Math.hypot(tangentDeltaX, tangentDeltaZ);
     const signedOffset = worldPosition.x - centerX;
     const distanceFromCenter = Math.abs(signedOffset);
+    const themeIndex = themeIndexFor(this.seed, chunkIndex);
 
     target.chunkIndex = chunkIndex;
     target.centerX = centerX;
@@ -557,8 +595,16 @@ export class RoadGenerator {
     target.normalizedOffset = signedOffset / (width * 0.5);
     target.distanceFromCenter = distanceFromCenter;
     target.isOnRoad = distanceFromCenter <= width * 0.5;
-    target.theme = THEME_DEFINITIONS[themeIndexFor(this.seed, chunkIndex)].name;
+    target.theme = THEME_DEFINITIONS[themeIndex].name;
     target.layout = ROAD_LAYOUTS[layoutIndex];
+    target.surfaceType = surfaceTypeAt(
+      themeIndex,
+      distanceFromCenter,
+      width,
+    );
+    target.edgeSurfaceType = edgeSurfaceTypeFor(themeIndex);
+    target.offRoadSurfaceType = offRoadSurfaceTypeFor(themeIndex);
+    target.farOffRoadSurfaceType = farOffRoadSurfaceTypeFor(themeIndex);
     return target;
   }
 }

@@ -11,6 +11,13 @@ import {
   triggerCartBump,
 } from "./cart.js";
 import { DustSystem } from "./dust-system.js";
+import {
+  SURFACE_DIRT,
+  SURFACE_GRASS,
+  SURFACE_GRAVEL,
+  SURFACE_MUD,
+  SURFACE_ROAD,
+} from "./procedural-world.js";
 import { createRoadGameplay } from "./road-gameplay.js";
 import { COOLDOWN_MS, MIN_INPUT_LEVEL, VoiceControls } from "./voice-controls.js";
 import { createWorld } from "./world.js";
@@ -31,6 +38,49 @@ const ROAD_LIMIT_WIDTH_RESPONSE = 2.4;
 const ROAD_EXCESS_RETURN_RESPONSE = 1.2;
 const ROAD_OFF_ROAD_RESISTANCE_MIN = 0.025;
 const ROAD_OFF_ROAD_RESISTANCE_MAX = 0.08;
+const SURFACE_BLEND_RESPONSE = 4.5;
+const SURFACE_PROFILES = Object.freeze({
+  [SURFACE_ROAD]: Object.freeze({
+    grip: 1,
+    rollingResistance: 0,
+    steeringFactor: 1,
+    vibration: 0,
+    dustFactor: 0.45,
+    speedMultiplier: 1,
+  }),
+  [SURFACE_DIRT]: Object.freeze({
+    grip: 0.96,
+    rollingResistance: 0.025,
+    steeringFactor: 0.95,
+    vibration: 0.045,
+    dustFactor: 1.1,
+    speedMultiplier: 0.99,
+  }),
+  [SURFACE_GRASS]: Object.freeze({
+    grip: 0.88,
+    rollingResistance: 0.08,
+    steeringFactor: 0.87,
+    vibration: 0.06,
+    dustFactor: 0.65,
+    speedMultiplier: 0.94,
+  }),
+  [SURFACE_GRAVEL]: Object.freeze({
+    grip: 0.84,
+    rollingResistance: 0.06,
+    steeringFactor: 0.91,
+    vibration: 0.14,
+    dustFactor: 1.6,
+    speedMultiplier: 0.96,
+  }),
+  [SURFACE_MUD]: Object.freeze({
+    grip: 0.7,
+    rollingResistance: 0.16,
+    steeringFactor: 0.78,
+    vibration: 0.09,
+    dustFactor: 0.08,
+    speedMultiplier: 0.86,
+  }),
+});
 const CHECKPOINTS = [400, 300, 200, 100];
 const MISSIONS = Object.freeze([
   Object.freeze({
@@ -253,6 +303,15 @@ const roadState = {
   enteredFarOffRoad: false,
   returnedToRoad: false,
 };
+const surfaceState = {
+  type: SURFACE_ROAD,
+  grip: 1,
+  rollingResistance: 0,
+  steeringFactor: 1,
+  vibration: 0,
+  dustFactor: SURFACE_PROFILES[SURFACE_ROAD].dustFactor,
+  speedMultiplier: 1,
+};
 
 const state = {
   started: false,
@@ -401,6 +460,7 @@ function initializeRoadPose() {
   cart.rotation.y = state.heading;
   updateTerrainPose(0, true);
   updateRoadState(0, true);
+  updateSurfaceState(0, true);
 }
 
 function updateRoadState(delta, resetTransitions = false) {
@@ -465,6 +525,64 @@ function updateRoadState(delta, resetTransitions = false) {
       previousZone === ROAD_ZONE_OFF_ROAD
       || previousZone === ROAD_ZONE_FAR_OFF_ROAD
     );
+}
+
+function updateSurfaceState(delta, snap = false) {
+  let surfaceType = SURFACE_ROAD;
+  if (roadState.zone === ROAD_ZONE_EDGE) {
+    surfaceType = currentRoadSample.edgeSurfaceType;
+  } else if (roadState.zone === ROAD_ZONE_OFF_ROAD) {
+    surfaceType = currentRoadSample.offRoadSurfaceType;
+  } else if (roadState.zone === ROAD_ZONE_FAR_OFF_ROAD) {
+    surfaceType = currentRoadSample.farOffRoadSurfaceType;
+  }
+  const profile = SURFACE_PROFILES[surfaceType];
+  surfaceState.type = surfaceType;
+  if (snap) {
+    surfaceState.grip = profile.grip;
+    surfaceState.rollingResistance = profile.rollingResistance;
+    surfaceState.steeringFactor = profile.steeringFactor;
+    surfaceState.vibration = profile.vibration;
+    surfaceState.dustFactor = profile.dustFactor;
+    surfaceState.speedMultiplier = profile.speedMultiplier;
+    return;
+  }
+  surfaceState.grip = damp(
+    surfaceState.grip,
+    profile.grip,
+    SURFACE_BLEND_RESPONSE,
+    delta,
+  );
+  surfaceState.rollingResistance = damp(
+    surfaceState.rollingResistance,
+    profile.rollingResistance,
+    SURFACE_BLEND_RESPONSE,
+    delta,
+  );
+  surfaceState.steeringFactor = damp(
+    surfaceState.steeringFactor,
+    profile.steeringFactor,
+    SURFACE_BLEND_RESPONSE,
+    delta,
+  );
+  surfaceState.vibration = damp(
+    surfaceState.vibration,
+    profile.vibration,
+    SURFACE_BLEND_RESPONSE,
+    delta,
+  );
+  surfaceState.dustFactor = damp(
+    surfaceState.dustFactor,
+    profile.dustFactor,
+    SURFACE_BLEND_RESPONSE,
+    delta,
+  );
+  surfaceState.speedMultiplier = damp(
+    surfaceState.speedMultiplier,
+    profile.speedMultiplier,
+    SURFACE_BLEND_RESPONSE,
+    delta,
+  );
 }
 
 function formatMissionTime(seconds) {
@@ -566,7 +684,7 @@ function updateJourneyProgress() {
 
 function updateMovement(delta) {
   const targetSpeed = state.journeyStatus === "playing"
-    ? controls.getTargetSpeed()
+    ? controls.getTargetSpeed() * surfaceState.speedMultiplier
     : 0;
   const previousSpeed = state.speed;
   const oldX = cart.position.x;
@@ -593,7 +711,7 @@ function updateMovement(delta) {
       const desiredAcceleration = THREE.MathUtils.clamp(
         speedError * tuning.speedResponse,
         -tuning.braking,
-        tuning.acceleration,
+        tuning.acceleration * surfaceState.speedMultiplier,
       );
       const response = speedError < 0
         ? tuning.brakingResponse
@@ -627,6 +745,7 @@ function updateMovement(delta) {
     state.steeringOffset += (
       steerInput
       * tuning.steering
+      * surfaceState.steeringFactor
       * (0.35 + speedRatio * 0.65)
       * direction
       * delta
@@ -735,6 +854,7 @@ function updateMovement(delta) {
   updateRoadSamples();
   updateTerrainPose(delta);
   updateRoadState(delta);
+  updateSurfaceState(delta);
 
   const travelledDistance =
     (cart.position.x - oldX) * headingVector.x
@@ -786,7 +906,12 @@ function updateMovement(delta) {
     roadSurface,
     state.acceleration,
   );
-  dustSystem.update({ cart, speed: state.speed, travelledDistance, delta });
+  dustSystem.update({
+    cart,
+    speed: state.speed,
+    travelledDistance: travelledDistance * surfaceState.dustFactor,
+    delta,
+  });
   audioManager.updateMovement(
     state.speed,
     delta,
@@ -839,6 +964,9 @@ function updateCamera(delta) {
     );
   chasePosition.x += Math.sin(state.elapsed * 15.7) * surfaceShake;
   chasePosition.y += Math.sin(state.elapsed * 18.3 + 0.7) * surfaceShake * 0.72;
+  const terrainSurfaceShake = movement * surfaceState.vibration * 0.018;
+  chasePosition.x += Math.sin(state.elapsed * 21.1 + 0.2) * terrainSurfaceShake;
+  chasePosition.y += Math.sin(state.elapsed * 24.7 + 1.4) * terrainSurfaceShake * 0.7;
   const cargoShake = state.cargoCameraFeedback * (0.018 + roadSurface.roughness * 0.028);
   chasePosition.x += Math.sin(state.elapsed * 12.9 + 0.4) * cargoShake;
   chasePosition.y += Math.sin(state.elapsed * 14.7 + 1.1) * cargoShake * 0.72;
@@ -1026,6 +1154,15 @@ function updateHud() {
         returnedToRoad: roadState.returnedToRoad,
         chunkIndex: currentRoadSample.chunkIndex,
       },
+      terrainSurface: {
+        surfaceType: surfaceState.type,
+        grip: Number(surfaceState.grip.toFixed(3)),
+        steeringFactor: Number(surfaceState.steeringFactor.toFixed(3)),
+        speedMultiplier: Number(surfaceState.speedMultiplier.toFixed(3)),
+        rollingResistance: Number(surfaceState.rollingResistance.toFixed(3)),
+        dustFactor: Number(surfaceState.dustFactor.toFixed(3)),
+        vibration: Number(surfaceState.vibration.toFixed(3)),
+      },
     });
   }
 }
@@ -1042,6 +1179,7 @@ function animate() {
   );
   if (import.meta.env.DEV && !state.started) updateRoadSamples();
   if (import.meta.env.DEV && !state.started) updateRoadState(0, true);
+  if (import.meta.env.DEV && !state.started) updateSurfaceState(0, true);
   villageLife.update({
     cartPosition: cart.position,
     cartSpeed: state.speed,
@@ -1185,6 +1323,17 @@ window.__bailgadi = {
         returnedToRoad: roadState.returnedToRoad,
         chunkIndex: currentRoadSample.chunkIndex,
         roadWidth: currentRoadSample.width,
+      }
+      : undefined,
+    terrainSurface: import.meta.env.DEV
+      ? {
+        surfaceType: surfaceState.type,
+        grip: surfaceState.grip,
+        steeringFactor: surfaceState.steeringFactor,
+        speedMultiplier: surfaceState.speedMultiplier,
+        rollingResistance: surfaceState.rollingResistance,
+        dustFactor: surfaceState.dustFactor,
+        vibration: surfaceState.vibration,
       }
       : undefined,
   }),

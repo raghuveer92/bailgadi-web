@@ -36,7 +36,27 @@
           <div><small>VILLAGE</small><strong id="remaining-distance">500 m</strong></div>
           <div><small>SPEED · <span id="speed-mode">STOPPED</span></small><strong id="speed">0.0 km/h</strong></div>
         </div>
-        <p id="objective">Reach the village - 500m</p>
+        <div class="objective-panel">
+          <div class="mission-heading">
+            <span>MISSION</span>
+            <strong id="mission-name">Rice Delivery</strong>
+          </div>
+          <div class="stability-heading">
+            <span>Cargo Stability</span>
+            <strong id="cargo-stability-value">100%</strong>
+          </div>
+          <div class="cargo-stability-bar" role="meter" aria-label="Cargo stability" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+            <span id="cargo-stability-fill"></span>
+          </div>
+          <div class="mission-meta">
+            <span>Reward <strong id="mission-reward">120 Coins</strong></span>
+            <span>Time <strong id="mission-time">04:00</strong></span>
+          </div>
+          <p id="objective" class="visually-hidden">Village: 500 m remaining</p>
+          <div class="journey-progress" aria-hidden="true">
+            <span id="journey-progress-fill"></span>
+          </div>
+        </div>
         <div id="voice-control" class="voice-control">
           <div class="hud-audio-row">
             <button id="voice-button" type="button" aria-pressed="false">
@@ -72,6 +92,14 @@
             <div><span>Rope tension:</span><strong id="movement-rope-tension">22%</strong></div>
             <div><span>Rein tension:</span><strong id="movement-rein-tension">24%</strong></div>
             <div><span>Driver input animation state:</span><strong id="movement-driver-input">IDLE</strong></div>
+            <div class="voice-debug-summary"><span>Cargo</span><strong></strong></div>
+            <div><span>Cargo Stability:</span><strong id="cargo-debug-stability">100%</strong></div>
+            <div><span>Cargo Damage:</span><strong id="cargo-debug-damage">0%</strong></div>
+            <div><span>Current Cargo Type:</span><strong id="cargo-debug-type">Rice Sacks</strong></div>
+            <div><span>Suspension Force:</span><strong id="cargo-debug-suspension">0.00</strong></div>
+            <div><span>Turn Strength:</span><strong id="cargo-debug-turn">0.00</strong></div>
+            <div><span>Road Roughness:</span><strong id="cargo-debug-roughness">0.00</strong></div>
+            <div><span>Cargo Animation Offset:</span><strong id="cargo-debug-offset">0.00, 0.00</strong></div>
             <p id="voice-trigger-notice" class="voice-trigger-notice" aria-live="polite"></p>
             <p>Last detected: <strong id="voice-last-detected">None</strong></p>
           </div>
@@ -79,7 +107,11 @@
       </div>
 
       <div id="checkpoint-message" class="checkpoint-message hidden" role="status"></div>
-      <div id="hint" class="hidden">Tap W / ↑ for more speed · Tap S / ↓ to stop, then reverse · A D to steer</div>
+      <div id="hint" class="hidden" aria-hidden="true">
+        <span><kbd>W</kbd> / <kbd>↑</kbd> Increase speed</span>
+        <span><kbd>S</kbd> / <kbd>↓</kbd> Brake</span>
+        <span><b>Mic</b> Custom sound control</span>
+      </div>
 
       <div id="touch-controls" class="hidden" aria-label="Touch controls">
         <div class="touch-steer">
@@ -98,7 +130,7 @@
           <p class="eyebrow">Journey complete</p>
           <h2 id="finish-title">Village Reached!</h2>
           <p class="finish-copy">The Bailgadi made it safely home.</p>
-          <button id="replay-button" type="button">REPLAY <span>↻</span></button>
+          <button id="replay-button" type="button"><span id="replay-label">NEXT MISSION</span> <span>→</span></button>
         </div>
       </section>
     </main>

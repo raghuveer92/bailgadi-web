@@ -28,6 +28,8 @@ const PATCH = material(0xa97343);
 const PATCH_LIGHT = material(0xc08b54);
 const DESTINATION_WOOD = material(0x714526);
 const DESTINATION_CLOTH = material(0xd7a83d);
+const DESTINATION_PLASTER = material(0xd9b271);
+const DESTINATION_LEAF = material(0x3f6b38);
 
 function prepareMesh(mesh, castShadow = true) {
   mesh.castShadow = castShadow;
@@ -137,6 +139,45 @@ function createDestinationMarker() {
     flag.position.set(x, 4.8, 0);
     marker.add(flag);
   }
+
+  const templeBase = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(5.4, 4.8, 5.2),
+    DESTINATION_PLASTER,
+  ));
+  templeBase.position.set(-14, 2.4, 9);
+  marker.add(templeBase);
+  const templeTower = prepareMesh(new THREE.Mesh(
+    new THREE.ConeGeometry(2.5, 8.5, 8),
+    DESTINATION_CLOTH,
+  ));
+  templeTower.position.set(-14, 8.95, 9);
+  marker.add(templeTower);
+  const templeFinial = prepareMesh(new THREE.Mesh(
+    new THREE.SphereGeometry(0.42, 7, 5),
+    DESTINATION_WOOD,
+  ));
+  templeFinial.position.set(-14, 13.25, 9);
+  marker.add(templeFinial);
+
+  const banyanTrunk = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.75, 1.15, 6.4, 8),
+    DESTINATION_WOOD,
+  ));
+  banyanTrunk.position.set(14.5, 3.2, 11);
+  marker.add(banyanTrunk);
+  [
+    [14.5, 7.2, 11, 3.7],
+    [11.9, 6.5, 11.2, 2.8],
+    [17.2, 6.6, 10.8, 2.9],
+    [14.4, 9.3, 10.8, 2.7],
+  ].forEach(([x, y, z, radius]) => {
+    const crown = prepareMesh(new THREE.Mesh(
+      new THREE.DodecahedronGeometry(radius, 0),
+      DESTINATION_LEAF,
+    ));
+    crown.position.set(x, y, z);
+    marker.add(crown);
+  });
   marker.position.set(0, 0, 480);
   return marker;
 }

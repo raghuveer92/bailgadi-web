@@ -2,32 +2,50 @@ import * as THREE from "three";
 
 const ROPE_SEGMENTS = 10;
 const REIN_SEGMENTS = 12;
-const ROPE_MATERIAL = new THREE.LineBasicMaterial({
-  color: 0x8b6536,
-  toneMapped: false,
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const SEGMENT_GEOMETRY = new THREE.CylinderGeometry(1, 1, 1, 6);
+const ROPE_MATERIAL = new THREE.MeshStandardMaterial({
+  color: 0x5d3822,
+  roughness: 0.94,
 });
-const REIN_MATERIAL = new THREE.LineBasicMaterial({
-  color: 0x4c2d1d,
-  toneMapped: false,
+const REIN_MATERIAL = new THREE.MeshStandardMaterial({
+  color: 0x3f2418,
+  roughness: 0.92,
 });
 
 function damp(current, target, response, delta) {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-response * delta));
 }
 
-function createDynamicLine(segmentCount, material) {
+function createDynamicLine(segmentCount, material, radius) {
   const positions = new Float32Array((segmentCount + 1) * 3);
   const geometry = new THREE.BufferGeometry();
   const attribute = new THREE.BufferAttribute(positions, 3);
   attribute.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("position", attribute);
 
-  const line = new THREE.Line(geometry, material);
-  line.frustumCulled = false;
-  line.renderOrder = 2;
+  const line = new THREE.Line(
+    geometry,
+    new THREE.LineBasicMaterial({ color: material.color, transparent: true, opacity: 0 }),
+  );
+  line.visible = false;
+
+  const segmentGroup = new THREE.Group();
+  const segmentMeshes = [];
+  for (let index = 0; index < segmentCount; index += 1) {
+    const segment = new THREE.Mesh(SEGMENT_GEOMETRY, material);
+    segment.scale.set(radius, 1, radius);
+    segment.castShadow = false;
+    segment.receiveShadow = false;
+    segment.renderOrder = 3;
+    segmentGroup.add(segment);
+    segmentMeshes.push(segment);
+  }
 
   return {
     line,
+    segmentGroup,
+    segmentMeshes,
     positions,
     attribute,
     segmentCount,
@@ -39,6 +57,9 @@ function createDynamicLine(segmentCount, material) {
       new THREE.Vector3(),
     ], false, "catmullrom", 0.45),
     sample: new THREE.Vector3(),
+    segmentStart: new THREE.Vector3(),
+    segmentEnd: new THREE.Vector3(),
+    segmentDirection: new THREE.Vector3(),
   };
 }
 
@@ -52,6 +73,26 @@ function sampleLine(dynamicLine) {
     positions[offset + 2] = sample.z;
   }
   attribute.needsUpdate = true;
+
+  for (let index = 0; index < segmentCount; index += 1) {
+    const startOffset = index * 3;
+    const endOffset = startOffset + 3;
+    dynamicLine.segmentStart.fromArray(positions, startOffset);
+    dynamicLine.segmentEnd.fromArray(positions, endOffset);
+    dynamicLine.segmentDirection.subVectors(
+      dynamicLine.segmentEnd,
+      dynamicLine.segmentStart,
+    );
+    const segment = dynamicLine.segmentMeshes[index];
+    segment.position.copy(dynamicLine.segmentStart)
+      .add(dynamicLine.segmentEnd)
+      .multiplyScalar(0.5);
+    segment.scale.y = dynamicLine.segmentDirection.length();
+    segment.quaternion.setFromUnitVectors(
+      Y_AXIS,
+      dynamicLine.segmentDirection.normalize(),
+    );
+  }
 }
 
 function anchorInRoot(anchor, root, target, worldPoint) {
@@ -81,20 +122,20 @@ export function createRopeReinAnimation(root, parts) {
   root.add(group);
 
   const traces = parts.bulls.map((bull, index) => {
-    const trace = createDynamicLine(ROPE_SEGMENTS, ROPE_MATERIAL);
+    const trace = createDynamicLine(ROPE_SEGMENTS, ROPE_MATERIAL, 0.05);
     trace.startAnchor = bull.ropeAnchor;
     trace.endAnchor = parts.cartRopeAnchors[index];
     setupTrace(trace, index === 0 ? -1 : 1);
-    group.add(trace.line);
+    group.add(trace.segmentGroup);
     return trace;
   });
 
   const reins = parts.bulls.map((bull, index) => {
-    const rein = createDynamicLine(REIN_SEGMENTS, REIN_MATERIAL);
+    const rein = createDynamicLine(REIN_SEGMENTS, REIN_MATERIAL, 0.04);
     rein.startAnchor = parts.driverHandAnchors[index];
     rein.endAnchor = bull.reinAnchor;
     setupRein(rein, index === 0 ? -1 : 1);
-    group.add(rein.line);
+    group.add(rein.segmentGroup);
     return rein;
   });
 
@@ -198,10 +239,10 @@ function updateRein(rein, system, elapsed, speedRatio, suspension, vibration) {
   points[3].lerpVectors(rein.start, rein.end, 0.75);
   points[4].copy(rein.end);
 
-  // Lift the reins over the front rail and yoke before reaching the bridles.
-  points[1].y -= sag * 0.28;
-  points[2].y -= sag + roadMotion;
-  points[3].y -= sag * 0.54 + roadMotion * 0.45;
+  // Keep the reins arcing over the cart rail, yoke and the bulls' shoulders.
+  points[1].y += 0.24 - sag * 0.08;
+  points[2].y += 0.34 - sag * 0.34 - roadMotion;
+  points[3].y += 0.2 - sag * 0.22 - roadMotion * 0.35;
   points[1].x += rein.side * 0.04;
   points[2].x += rein.side * 0.08 + lateral;
   points[3].x += lateral * 0.35;

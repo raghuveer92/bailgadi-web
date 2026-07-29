@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import "./style.css";
 import { AudioManager } from "./audio-manager.js";
+import { CargoPhysicsManager, CARGO_TYPES } from "./cargo-physics-manager.js";
 import { Controls, MAX_CART_SPEED, MAX_REVERSE_SPEED } from "./controls.js";
 import {
   animateCart,
@@ -14,10 +15,56 @@ import { createRoadGameplay } from "./road-gameplay.js";
 import { COOLDOWN_MS, MIN_INPUT_LEVEL, VoiceControls } from "./voice-controls.js";
 import { createWorld } from "./world.js";
 
-const JOURNEY_DISTANCE = 500;
 const START_X = 0;
-const START_Z = -20;
+const MISSION_END_Z = 480;
 const CHECKPOINTS = [400, 300, 200, 100];
+const MISSIONS = Object.freeze([
+  Object.freeze({
+    name: "Rice Delivery",
+    cargoType: "rice",
+    reward: 120,
+    distance: 500,
+    timeLimit: 240,
+    roadRoughness: 1,
+    level: 1,
+  }),
+  Object.freeze({
+    name: "Morning Milk Run",
+    cargoType: "milk",
+    reward: 155,
+    distance: 530,
+    timeLimit: 255,
+    roadRoughness: 1.08,
+    level: 2,
+  }),
+  Object.freeze({
+    name: "Market Vegetables",
+    cargoType: "vegetables",
+    reward: 185,
+    distance: 555,
+    timeLimit: 270,
+    roadRoughness: 1.15,
+    level: 3,
+  }),
+  Object.freeze({
+    name: "Timber Haul",
+    cargoType: "wood",
+    reward: 220,
+    distance: 585,
+    timeLimit: 285,
+    roadRoughness: 1.23,
+    level: 4,
+  }),
+  Object.freeze({
+    name: "Clay Pot Delivery",
+    cargoType: "clay",
+    reward: 280,
+    distance: 620,
+    timeLimit: 300,
+    roadRoughness: 1.32,
+    level: 5,
+  }),
+]);
 
 const root = document.querySelector("#canvas-root");
 const startScreen = document.querySelector("#start-screen");
@@ -30,6 +77,14 @@ const touchControls = document.querySelector("#touch-controls");
 const distanceLabel = document.querySelector("#distance");
 const remainingDistanceLabel = document.querySelector("#remaining-distance");
 const objectiveLabel = document.querySelector("#objective");
+const journeyProgressFill = document.querySelector("#journey-progress-fill");
+const missionPanel = document.querySelector(".objective-panel");
+const missionNameLabel = document.querySelector("#mission-name");
+const missionRewardLabel = document.querySelector("#mission-reward");
+const missionTimeLabel = document.querySelector("#mission-time");
+const cargoStabilityValue = document.querySelector("#cargo-stability-value");
+const cargoStabilityFill = document.querySelector("#cargo-stability-fill");
+const cargoStabilityBar = document.querySelector(".cargo-stability-bar");
 const speedLabel = document.querySelector("#speed");
 const speedModeLabel = document.querySelector("#speed-mode");
 const checkpointMessage = document.querySelector("#checkpoint-message");
@@ -39,6 +94,10 @@ const voiceMessage = document.querySelector("#voice-message");
 const voiceDebugPanel = document.querySelector("#voice-debug");
 const voiceLastDetected = document.querySelector("#voice-last-detected");
 const soundButton = document.querySelector("#sound-button");
+const finishEyebrow = document.querySelector(".finish-card .eyebrow");
+const finishTitle = document.querySelector("#finish-title");
+const finishCopy = document.querySelector(".finish-copy");
+const replayLabel = document.querySelector("#replay-label");
 const movementDebug = {
   speedLevel: document.querySelector("#movement-speed-level"),
   targetSpeed: document.querySelector("#movement-target-speed"),
@@ -49,6 +108,13 @@ const movementDebug = {
   ropeTension: document.querySelector("#movement-rope-tension"),
   reinTension: document.querySelector("#movement-rein-tension"),
   driverInput: document.querySelector("#movement-driver-input"),
+  cargoStability: document.querySelector("#cargo-debug-stability"),
+  cargoDamage: document.querySelector("#cargo-debug-damage"),
+  cargoType: document.querySelector("#cargo-debug-type"),
+  cargoSuspension: document.querySelector("#cargo-debug-suspension"),
+  cargoTurn: document.querySelector("#cargo-debug-turn"),
+  cargoRoughness: document.querySelector("#cargo-debug-roughness"),
+  cargoOffset: document.querySelector("#cargo-debug-offset"),
 };
 
 const scene = new THREE.Scene();
@@ -70,9 +136,14 @@ root.appendChild(renderer.domElement);
 const { obstacles, sun, villageLife } = createWorld(scene);
 const roadGameplay = createRoadGameplay(scene);
 const { group: cart, animationParts } = createBullockCart();
-cart.position.set(START_X, 0.05, START_Z);
+cart.position.set(START_X, 0.05, MISSION_END_Z - MISSIONS[0].distance);
 scene.add(cart);
 const dustSystem = new DustSystem(scene);
+const cargoPhysics = new CargoPhysicsManager(
+  animationParts.cargoRoot,
+  animationParts.cargoGroups,
+  animationParts,
+);
 
 const audioManager = new AudioManager(soundButton);
 const controls = new Controls({
@@ -133,6 +204,13 @@ const state = {
   acceleration: 0,
   cameraDistance: 0,
   movementDebugTimer: 0,
+  hudProgressBucket: -1,
+  stabilityHudBucket: -1,
+  cargoImpact: 0,
+  cargoCameraFeedback: 0,
+  missionIndex: 0,
+  nextMissionIndex: 1,
+  mission: MISSIONS[0],
   journeyStatus: "ready",
   passedCheckpoints: new Set(),
 };
@@ -146,16 +224,41 @@ const tuning = {
   accelerationResponse: 2.4,
   brakingResponse: 3.1,
   steering: 0.52,
-  cameraDistance: 13.5,
+  cameraDistance: 11.8,
   cameraSpeedPullback: 2,
-  cameraHeight: 7.3,
+  cameraHeight: 6.35,
 };
 
-camera.position.set(0, 8.5, -33);
-camera.lookAt(0, 1.3, -14);
+function updateResponsiveFraming() {
+  const isMobile = window.innerWidth <= 800;
+  const isPortrait = window.innerHeight > window.innerWidth;
+  tuning.cameraDistance = isMobile ? (isPortrait ? 13.1 : 12.2) : 11.8;
+  tuning.cameraHeight = isMobile ? (isPortrait ? 7.15 : 6.65) : 6.35;
+  camera.fov = isMobile ? (isPortrait ? 58 : 55) : 52;
+  camera.updateProjectionMatrix();
+}
+
+updateResponsiveFraming();
+camera.position.set(
+  0,
+  tuning.cameraHeight + 0.8,
+  MISSION_END_Z - MISSIONS[0].distance - tuning.cameraDistance,
+);
+camera.lookAt(0, 1.4, MISSION_END_Z - MISSIONS[0].distance + 4.4);
 
 function damp(current, target, smoothing, delta) {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-smoothing * delta));
+}
+
+function missionStartZ() {
+  return MISSION_END_Z - state.mission.distance;
+}
+
+function formatMissionTime(seconds) {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
 function sceneryObstacleHit(nextX, nextZ) {
@@ -177,11 +280,20 @@ function showCheckpoint(remaining) {
 
 function beginJourneyFinish() {
   if (state.journeyStatus !== "playing") return;
-  state.progress = JOURNEY_DISTANCE;
+  state.progress = state.mission.distance;
   state.journeyStatus = "finishing";
   controls.resetAll();
   controls.setEnabled(false);
   hint.classList.add("hidden");
+}
+
+function showMissionResult(eyebrow, title, copy, buttonLabel) {
+  finishEyebrow.textContent = eyebrow;
+  finishTitle.textContent = title;
+  finishCopy.textContent = copy;
+  replayLabel.textContent = buttonLabel;
+  finishScreen.classList.remove("is-hidden");
+  replayButton.focus({ preventScroll: true });
 }
 
 function completeJourney() {
@@ -193,14 +305,43 @@ function completeJourney() {
   controls.setEnabled(false);
   touchControls.classList.add("hidden");
   checkpointMessage.classList.add("hidden");
-  finishScreen.classList.remove("is-hidden");
-  replayButton.focus({ preventScroll: true });
+  state.nextMissionIndex = (state.missionIndex + 1) % MISSIONS.length;
+  showMissionResult(
+    "Journey complete",
+    "Village Reached!",
+    `The ${CARGO_TYPES[state.mission.cargoType].label.toLowerCase()} arrived safely.`,
+    "NEXT MISSION",
+  );
+}
+
+function failCargoMission() {
+  if (state.journeyStatus !== "playing") return;
+  state.speed = 0;
+  state.acceleration = 0;
+  state.journeyStatus = "cargo-lost";
+  state.nextMissionIndex = (state.missionIndex + 1) % MISSIONS.length;
+  controls.resetAll();
+  controls.setEnabled(false);
+  touchControls.classList.add("hidden");
+  hint.classList.add("hidden");
+  checkpointMessage.classList.add("hidden");
+  audioManager.playCargoFailure();
+  showMissionResult(
+    "Mission failed",
+    "Cargo Damaged",
+    "The load could not survive the journey. A new delivery is ready.",
+    "NEW MISSION",
+  );
 }
 
 function updateJourneyProgress() {
   if (state.journeyStatus !== "playing") return;
-  state.progress = THREE.MathUtils.clamp(cart.position.z - START_Z, 0, JOURNEY_DISTANCE);
-  const remaining = Math.max(0, JOURNEY_DISTANCE - state.progress);
+  state.progress = THREE.MathUtils.clamp(
+    cart.position.z - missionStartZ(),
+    0,
+    state.mission.distance,
+  );
+  const remaining = Math.max(0, state.mission.distance - state.progress);
   CHECKPOINTS.forEach((checkpoint) => {
     if (remaining <= checkpoint && !state.passedCheckpoints.has(checkpoint)) {
       state.passedCheckpoints.add(checkpoint);
@@ -282,6 +423,7 @@ function updateMovement(delta) {
     state.speed *= -0.12;
     state.collisionPulse = 0.16;
     state.collisionStrength = 0.65;
+    state.cargoImpact = Math.max(state.cargoImpact, 0.65);
   } else {
     cart.position.x = THREE.MathUtils.clamp(nextX, -125, 125);
     cart.position.z = THREE.MathUtils.clamp(nextZ, -345, 495);
@@ -304,6 +446,7 @@ function updateMovement(delta) {
       state.speed *= 1 - impact.severity * 0.22;
       state.collisionPulse = 0.3;
       state.collisionStrength = impact.severity;
+      state.cargoImpact = Math.max(state.cargoImpact, impact.severity);
       triggerCartBump(animationParts, impact.severity, impact.side);
       audioManager.triggerBump(
         0.78 + impact.severity * 0.22,
@@ -314,6 +457,23 @@ function updateMovement(delta) {
 
   updateJourneyProgress();
   roadGameplay.sampleSurface(cart.position, roadSurface);
+  roadSurface.roughness = THREE.MathUtils.clamp(
+    roadSurface.roughness * state.mission.roadRoughness,
+    0,
+    1,
+  );
+  const turnStrength = steerInput * speedRatio;
+  cargoPhysics.update(
+    delta,
+    state.acceleration,
+    speedRatio,
+    turnStrength,
+    roadSurface.roughness,
+    state.cargoImpact,
+    animationParts.suspensionY,
+  );
+  state.cargoImpact = 0;
+  if (cargoPhysics.stability.justLost) failCargoMission();
   animateCart(
     animationParts,
     state.speed,
@@ -331,13 +491,33 @@ function updateMovement(delta) {
     animationParts.gaitPlaybackRate,
     roadSurface.roughness,
   );
+  audioManager.updateCargo(
+    cargoPhysics.stability.stability,
+    state.mission.cargoType,
+    animationParts.ropeRein.ropeTension,
+    roadSurface.roughness,
+    delta,
+  );
 }
 
 function updateCamera(delta) {
   headingVector.set(Math.sin(state.heading), 0, Math.cos(state.heading));
   const movement = Math.min(Math.abs(state.speed) / tuning.maxForward, 1);
+  const targetCargoFeedback = THREE.MathUtils.clamp(
+    (70 - cargoPhysics.stability.stability) / 70,
+    0,
+    1,
+  );
+  state.cargoCameraFeedback = damp(
+    state.cargoCameraFeedback,
+    targetCargoFeedback,
+    targetCargoFeedback > state.cargoCameraFeedback ? 2.4 : 1.45,
+    delta,
+  );
   const chaseDistance =
-    tuning.cameraDistance + movement * tuning.cameraSpeedPullback;
+    tuning.cameraDistance
+    + movement * tuning.cameraSpeedPullback
+    - state.cargoCameraFeedback * 0.58;
   const chaseHeight = tuning.cameraHeight + movement * 0.22;
   chasePosition.copy(cart.position)
     .addScaledVector(headingVector, -chaseDistance);
@@ -356,6 +536,9 @@ function updateCamera(delta) {
     );
   chasePosition.x += Math.sin(state.elapsed * 15.7) * surfaceShake;
   chasePosition.y += Math.sin(state.elapsed * 18.3 + 0.7) * surfaceShake * 0.72;
+  const cargoShake = state.cargoCameraFeedback * (0.018 + roadSurface.roughness * 0.028);
+  chasePosition.x += Math.sin(state.elapsed * 12.9 + 0.4) * cargoShake;
+  chasePosition.y += Math.sin(state.elapsed * 14.7 + 1.1) * cargoShake * 0.72;
 
   if (state.collisionPulse > 0) {
     state.collisionPulse = Math.max(0, state.collisionPulse - delta);
@@ -368,8 +551,8 @@ function updateCamera(delta) {
     chasePosition,
     1 - Math.exp(-(3.55 - movement * 0.35) * delta),
   );
-  lookTarget.copy(cart.position).addScaledVector(headingVector, 4.2 + movement * 0.8);
-  lookTarget.y += 1.35 + animationParts.suspensionY * 0.18;
+  lookTarget.copy(cart.position).addScaledVector(headingVector, 5.1 + movement * 1.05);
+  lookTarget.y += 1.25 + animationParts.suspensionY * 0.18;
   camera.lookAt(lookTarget);
   state.cameraDistance = camera.position.distanceTo(cart.position);
 
@@ -402,17 +585,47 @@ function updateMovementDebug(delta) {
     `${Math.round(animationParts.ropeRein.reinTension * 100)}%`;
   movementDebug.driverInput.textContent =
     animationParts.ropeRein.driverInputState;
+  movementDebug.cargoStability.textContent =
+    `${Math.round(cargoPhysics.stability.stability)}% · ${cargoPhysics.stability.status.toUpperCase()}`;
+  movementDebug.cargoDamage.textContent =
+    `${cargoPhysics.stability.damage.toFixed(1)}%`;
+  movementDebug.cargoType.textContent =
+    CARGO_TYPES[state.mission.cargoType].label;
+  movementDebug.cargoSuspension.textContent =
+    cargoPhysics.stability.suspensionForce.toFixed(2);
+  movementDebug.cargoTurn.textContent =
+    cargoPhysics.stability.turnStrength.toFixed(2);
+  movementDebug.cargoRoughness.textContent =
+    cargoPhysics.stability.roadRoughness.toFixed(2);
+  movementDebug.cargoOffset.textContent =
+    `${cargoPhysics.animation.offsetX.toFixed(2)}, ${cargoPhysics.animation.offsetY.toFixed(2)}`;
 }
 
 function updateHud() {
-  const remaining = Math.max(0, JOURNEY_DISTANCE - state.progress);
+  const remaining = Math.max(0, state.mission.distance - state.progress);
   distanceLabel.textContent = state.distance < 1000
     ? `${Math.floor(state.distance)} m`
     : `${(state.distance / 1000).toFixed(2)} km`;
   remainingDistanceLabel.textContent = `${Math.ceil(remaining)} m`;
   objectiveLabel.textContent = state.journeyStatus === "reached"
     ? "Village reached"
-    : `Reach the village - ${Math.ceil(remaining)}m`;
+    : `Village: ${Math.ceil(remaining)} m remaining`;
+  const progressBucket = Math.floor(state.progress * 2);
+  if (progressBucket !== state.hudProgressBucket) {
+    state.hudProgressBucket = progressBucket;
+    journeyProgressFill.style.transform = `scaleX(${state.progress / state.mission.distance})`;
+  }
+  missionNameLabel.textContent = state.mission.name;
+  missionRewardLabel.textContent = `${state.mission.reward} Coins`;
+  missionTimeLabel.textContent = formatMissionTime(state.mission.timeLimit - state.elapsed);
+  const stabilityRounded = Math.round(cargoPhysics.stability.stability);
+  if (stabilityRounded !== state.stabilityHudBucket) {
+    state.stabilityHudBucket = stabilityRounded;
+    cargoStabilityValue.textContent = `${stabilityRounded}%`;
+    cargoStabilityFill.style.transform = `scaleX(${stabilityRounded / 100})`;
+    cargoStabilityBar.setAttribute("aria-valuenow", String(stabilityRounded));
+    missionPanel.dataset.stability = cargoPhysics.stability.status;
+  }
   speedLabel.textContent = `${Math.abs(state.speed * 3.6).toFixed(1)} km/h`;
   speedModeLabel.textContent = controls.getSpeedMode();
   if (import.meta.env.DEV) {
@@ -429,6 +642,15 @@ function updateHud() {
       heading: Number(state.heading.toFixed(3)),
       acceleration: Number(state.acceleration.toFixed(3)),
       cameraDistance: Number(state.cameraDistance.toFixed(3)),
+      mission: state.mission.name,
+      cargoType: state.mission.cargoType,
+      cargoStability: Number(cargoPhysics.stability.stability.toFixed(2)),
+      cargoDamage: Number(cargoPhysics.stability.damage.toFixed(2)),
+      cargoStatus: cargoPhysics.stability.status,
+      cargoOffset: [
+        Number(cargoPhysics.animation.offsetX.toFixed(3)),
+        Number(cargoPhysics.animation.offsetY.toFixed(3)),
+      ],
       wheelRotation: Number(animationParts.wheels[0].rotation.x.toFixed(3)),
       bullLegs: animationParts.bulls.map((bull) =>
         bull.legs.map((leg) => Number(leg.root.rotation.x.toFixed(3)))
@@ -464,6 +686,7 @@ function animate() {
 function startGame() {
   state.started = true;
   state.journeyStatus = "playing";
+  cargoPhysics.reset(state.mission.cargoType, state.mission.level);
   controls.resetAll();
   controls.setEnabled(true);
   startScreen.classList.add("is-hidden");
@@ -472,7 +695,7 @@ function startGame() {
   touchControls.classList.remove("hidden");
   audioManager.start();
   playButton.blur();
-  setTimeout(() => hint.classList.add("hidden"), 7000);
+  setTimeout(() => hint.classList.add("hidden"), 5600);
   if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("audiotest")) {
     window.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowUp", bubbles: true }));
     setTimeout(() => {
@@ -483,6 +706,9 @@ function startGame() {
 
 function replayGame() {
   window.clearTimeout(checkpointTimer);
+  state.missionIndex = state.nextMissionIndex;
+  state.mission = MISSIONS[state.missionIndex];
+  state.nextMissionIndex = (state.missionIndex + 1) % MISSIONS.length;
   controls.resetAll();
   controls.setEnabled(true);
   roadGameplay.reset();
@@ -498,15 +724,20 @@ function replayGame() {
   state.acceleration = 0;
   state.cameraDistance = 0;
   state.movementDebugTimer = 0;
+  state.hudProgressBucket = -1;
+  state.stabilityHudBucket = -1;
+  state.cargoImpact = 0;
+  state.cargoCameraFeedback = 0;
   state.journeyStatus = "playing";
   state.passedCheckpoints.clear();
-  cart.position.set(START_X, 0.05, START_Z);
+  cart.position.set(START_X, 0.05, missionStartZ());
   cart.rotation.set(0, 0, 0);
   previousPosition.copy(cart.position);
-  camera.position.set(0, 8.5, -33);
-  camera.lookAt(0, 1.3, -14);
+  camera.position.set(0, tuning.cameraHeight + 0.8, missionStartZ() - tuning.cameraDistance);
+  camera.lookAt(0, 1.4, missionStartZ() + 4.4);
   roadSurface.roughness = 0;
   roadSurface.roll = 0;
+  cargoPhysics.reset(state.mission.cargoType, state.mission.level);
   finishScreen.classList.add("is-hidden");
   checkpointMessage.classList.add("hidden");
   touchControls.classList.remove("hidden");
@@ -517,7 +748,7 @@ playButton.addEventListener("click", startGame);
 replayButton.addEventListener("click", replayGame);
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
+  updateResponsiveFraming();
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(getRenderPixelRatio());
 });
@@ -530,8 +761,11 @@ window.__bailgadi = {
     started: state.started,
     speed: state.speed,
     distance: state.distance,
-    remaining: Math.max(0, JOURNEY_DISTANCE - state.progress),
+    remaining: Math.max(0, state.mission.distance - state.progress),
     journeyStatus: state.journeyStatus,
+    mission: state.mission.name,
+    cargoType: state.mission.cargoType,
+    cargoStability: cargoPhysics.stability.stability,
     cartPosition: cart.position.toArray(),
     cartHeading: state.heading,
     cameraPosition: camera.position.toArray(),

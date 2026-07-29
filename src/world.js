@@ -7,6 +7,8 @@ const materials = {
   grassLight: mat(0x91ad4f),
   road: mat(0xb98550),
   roadLight: mat(0xc99b61),
+  roadTrack: mat(0x9f6f43),
+  roadDust: mat(0xd0a268),
   leaf: mat(0x315f32),
   leafLight: mat(0x4d7d3a),
   trunk: mat(0x654326),
@@ -18,6 +20,12 @@ const materials = {
   roofStraw: mat(0xc29a54),
   field: mat(0x9eaa42),
   water: mat(0x65a9b3, 0.35),
+  dryGrass: mat(0xb69a4d),
+  bush: mat(0x527738),
+  clay: mat(0xa85f3d),
+  hay: mat(0xc9a84e),
+  distantHill: mat(0x708853),
+  distantTree: mat(0x3e613d),
 };
 
 function seeded(seed = 4567) {
@@ -145,13 +153,203 @@ function createRoadsideShrine() {
   return enableShadows(shrine);
 }
 
+function createRoadSurfaceDetail(scene, random) {
+  const transform = new THREE.Object3D();
+  const trackGeometry = new THREE.PlaneGeometry(0.28, 6.4);
+  const tracks = new THREE.InstancedMesh(trackGeometry, materials.roadTrack, 186);
+  let trackIndex = 0;
+  for (let z = -330; z < 500; z += 9) {
+    [-1, 1].forEach((side) => {
+      transform.position.set(side * (3.45 + (random() - 0.5) * 0.18), 0.052, z);
+      transform.rotation.set(-Math.PI / 2, 0, (random() - 0.5) * 0.018);
+      transform.scale.set(0.8 + random() * 0.35, 0.78 + random() * 0.28, 1);
+      transform.updateMatrix();
+      tracks.setMatrixAt(trackIndex, transform.matrix);
+      trackIndex += 1;
+    });
+  }
+  tracks.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  tracks.receiveShadow = true;
+  scene.add(tracks);
+
+  const patchGeometry = new THREE.CircleGeometry(1, 9);
+  const patches = new THREE.InstancedMesh(patchGeometry, materials.roadDust, 42);
+  for (let index = 0; index < 42; index += 1) {
+    const side = index % 2 ? 1 : -1;
+    transform.position.set(side * (6.3 + random() * 2.2), 0.056, -300 + random() * 780);
+    transform.rotation.set(-Math.PI / 2, 0, random() * Math.PI);
+    transform.scale.set(0.55 + random() * 1.2, 0.3 + random() * 0.55, 1);
+    transform.updateMatrix();
+    patches.setMatrixAt(index, transform.matrix);
+  }
+  patches.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  scene.add(patches);
+}
+
+function createRoadsideDetails(scene, random) {
+  const transform = new THREE.Object3D();
+
+  const grassGeometry = new THREE.ConeGeometry(0.18, 0.8, 5);
+  const grass = new THREE.InstancedMesh(grassGeometry, materials.dryGrass, 150);
+  for (let index = 0; index < 150; index += 1) {
+    const side = index % 2 ? 1 : -1;
+    transform.position.set(side * (10.1 + random() * 4.9), 0.34, -305 + random() * 790);
+    transform.rotation.set((random() - 0.5) * 0.08, random() * Math.PI, (random() - 0.5) * 0.12);
+    transform.scale.set(0.7 + random() * 0.8, 0.65 + random() * 0.75, 0.7 + random() * 0.8);
+    transform.updateMatrix();
+    grass.setMatrixAt(index, transform.matrix);
+  }
+  grass.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  grass.castShadow = false;
+  grass.receiveShadow = true;
+  scene.add(grass);
+
+  const bushGeometry = new THREE.DodecahedronGeometry(0.72, 0);
+  const bushes = new THREE.InstancedMesh(bushGeometry, materials.bush, 52);
+  for (let index = 0; index < 52; index += 1) {
+    const side = index % 2 ? 1 : -1;
+    transform.position.set(side * (11.7 + random() * 8.5), 0.5, -290 + random() * 760);
+    transform.rotation.set(0, random() * Math.PI, 0);
+    transform.scale.set(0.7 + random() * 0.65, 0.55 + random() * 0.5, 0.75 + random() * 0.7);
+    transform.updateMatrix();
+    bushes.setMatrixAt(index, transform.matrix);
+  }
+  bushes.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  bushes.castShadow = true;
+  bushes.receiveShadow = true;
+  scene.add(bushes);
+
+  const stoneGeometry = new THREE.DodecahedronGeometry(0.2, 0);
+  const stones = new THREE.InstancedMesh(stoneGeometry, materials.rockLight, 58);
+  for (let index = 0; index < 58; index += 1) {
+    const side = index % 2 ? 1 : -1;
+    transform.position.set(side * (9.9 + random() * 3.8), 0.13, -310 + random() * 790);
+    transform.rotation.set(random(), random() * Math.PI, random() * 0.4);
+    transform.scale.set(0.55 + random(), 0.35 + random() * 0.45, 0.55 + random());
+    transform.updateMatrix();
+    stones.setMatrixAt(index, transform.matrix);
+  }
+  stones.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  stones.castShadow = false;
+  stones.receiveShadow = true;
+  scene.add(stones);
+
+  const propGroup = new THREE.Group();
+  propGroup.name = "PooledRoadsideProps";
+  const postGeometry = new THREE.BoxGeometry(0.16, 1.25, 0.16);
+  const railGeometry = new THREE.BoxGeometry(0.12, 0.12, 2.5);
+  const fenceMaterial = materials.trunk;
+  [-145, -44, 71, 188, 305, 410].forEach((z, placementIndex) => {
+    const side = placementIndex % 2 ? 1 : -1;
+    for (let index = 0; index < 4; index += 1) {
+      const post = new THREE.Mesh(postGeometry, fenceMaterial);
+      post.position.set(side * (12.8 + index * 0.04), 0.62, z + index * 2.4);
+      propGroup.add(post);
+      if (index < 3) {
+        const rail = new THREE.Mesh(railGeometry, fenceMaterial);
+        rail.position.set(side * 12.8, 0.78, z + 1.2 + index * 2.4);
+        propGroup.add(rail);
+      }
+    }
+  });
+
+  const hayGeometry = new THREE.ConeGeometry(1.25, 1.55, 9);
+  [-104, 25, 137, 229, 362].forEach((z, index) => {
+    const hay = new THREE.Mesh(hayGeometry, materials.hay);
+    hay.position.set((index % 2 ? 1 : -1) * 14.5, 0.77, z);
+    hay.rotation.y = index * 0.8;
+    propGroup.add(hay);
+  });
+
+  const potGeometry = new THREE.SphereGeometry(0.42, 8, 6);
+  const potRimGeometry = new THREE.TorusGeometry(0.28, 0.065, 5, 9);
+  [-72, 48, 164, 274, 398].forEach((z, index) => {
+    const side = index % 2 ? 1 : -1;
+    const pot = new THREE.Mesh(potGeometry, materials.clay);
+    pot.scale.y = 1.18;
+    pot.position.set(side * 11.7, 0.43, z);
+    const rim = new THREE.Mesh(potRimGeometry, materials.clay);
+    rim.rotation.x = Math.PI / 2;
+    rim.position.set(side * 11.7, 0.79, z);
+    propGroup.add(pot, rim);
+  });
+
+  const cartBedGeometry = new THREE.BoxGeometry(2.2, 0.18, 1.5);
+  const cartWheelGeometry = new THREE.TorusGeometry(0.48, 0.1, 6, 12);
+  [-18, 116, 257, 382].forEach((z, index) => {
+    const parkedCart = new THREE.Group();
+    const bed = new THREE.Mesh(cartBedGeometry, materials.trunk);
+    bed.position.y = 0.88;
+    parkedCart.add(bed);
+    [-1, 1].forEach((side) => {
+      const wheel = new THREE.Mesh(cartWheelGeometry, materials.trunk);
+      wheel.rotation.y = Math.PI / 2;
+      wheel.position.set(side * 1.08, 0.48, 0);
+      parkedCart.add(wheel);
+    });
+    parkedCart.position.set((index % 2 ? 1 : -1) * 15.8, 0, z);
+    parkedCart.rotation.y = index % 2 ? -0.18 : 0.18;
+    propGroup.add(parkedCart);
+  });
+
+  const signPostGeometry = new THREE.BoxGeometry(0.16, 2.15, 0.16);
+  const signBoardGeometry = new THREE.BoxGeometry(1.9, 0.7, 0.13);
+  [-156, 92, 218, 344].forEach((z, index) => {
+    const side = index % 2 ? 1 : -1;
+    const sign = new THREE.Group();
+    const post = new THREE.Mesh(signPostGeometry, materials.trunk);
+    post.position.y = 1.08;
+    const board = new THREE.Mesh(signBoardGeometry, index % 2 ? materials.plasterBlue : materials.roof);
+    board.position.y = 1.9;
+    sign.add(post, board);
+    sign.position.set(side * 11.5, 0, z);
+    sign.rotation.y = side * -0.18;
+    propGroup.add(sign);
+  });
+  enableShadows(propGroup);
+  scene.add(propGroup);
+}
+
+function createHorizon(scene) {
+  const hills = new THREE.Group();
+  hills.name = "DistantHorizon";
+  [
+    [-105, 410, 52, 22],
+    [-58, 438, 44, 18],
+    [62, 430, 48, 20],
+    [112, 405, 58, 24],
+  ].forEach(([x, z, width, height]) => {
+    const hill = new THREE.Mesh(new THREE.ConeGeometry(width, height, 7), materials.distantHill);
+    hill.position.set(x, height * 0.35, z);
+    hill.scale.z = 0.65;
+    hills.add(hill);
+  });
+  for (let index = 0; index < 18; index += 1) {
+    const tree = new THREE.Mesh(
+      new THREE.ConeGeometry(2.1 + (index % 3) * 0.45, 7 + (index % 4), 6),
+      materials.distantTree,
+    );
+    tree.position.set(-82 + index * 9.5, 3.5, 423 + (index % 3) * 7);
+    hills.add(tree);
+  }
+  for (let index = 0; index < 7; index += 1) {
+    const building = new THREE.Mesh(
+      new THREE.BoxGeometry(4 + (index % 2), 4.5 + (index % 3), 4),
+      index % 2 ? materials.plaster : materials.plasterBlue,
+    );
+    building.position.set(-43 + index * 14, 2.3, 448 + (index % 2) * 5);
+    hills.add(building);
+  }
+  scene.add(hills);
+}
+
 export function createWorld(scene) {
   const obstacles = [];
   const windTargets = [];
   const random = seeded();
 
   scene.background = new THREE.Color(0xa4cde3);
-  scene.fog = new THREE.Fog(0xa4cde3, 75, 230);
+  scene.fog = new THREE.Fog(0xa4cde3, 90, 285);
 
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(280, 900), materials.grass);
   ground.rotation.x = -Math.PI / 2;
@@ -165,14 +363,9 @@ export function createWorld(scene) {
   road.receiveShadow = true;
   scene.add(road);
 
-  for (let z = -330; z < 500; z += 9) {
-    const rut = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 5.6), materials.roadLight);
-    rut.rotation.x = -Math.PI / 2;
-    rut.rotation.z = (random() - 0.5) * 0.06;
-    rut.position.set((random() > 0.5 ? 1 : -1) * (3.6 + random() * 1.1), 0.05, z + random() * 3);
-    rut.receiveShadow = true;
-    scene.add(rut);
-  }
+  createRoadSurfaceDetail(scene, random);
+  createRoadsideDetails(scene, random);
+  createHorizon(scene);
 
   const fieldPlacements = [
     [-39, 8, 40, 38, 0xc1b948],
@@ -277,10 +470,11 @@ export function createWorld(scene) {
 
   const villageLife = createVillageLife(scene, { random, windTargets });
 
-  const sun = new THREE.DirectionalLight(0xfff1c7, 3.1);
+  const sun = new THREE.DirectionalLight(0xffdfaa, 3.05);
   sun.position.set(-42, 65, -25);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  const mobileShadows = Math.min(window.innerWidth, window.innerHeight) < 800;
+  sun.shadow.mapSize.set(mobileShadows ? 1024 : 2048, mobileShadows ? 1024 : 2048);
   sun.shadow.camera.left = -48;
   sun.shadow.camera.right = 48;
   sun.shadow.camera.top = 48;
@@ -290,7 +484,7 @@ export function createWorld(scene) {
   sun.shadow.bias = -0.00025;
   scene.add(sun);
 
-  scene.add(new THREE.HemisphereLight(0xcde7ff, 0x56713b, 1.85));
+  scene.add(new THREE.HemisphereLight(0xd8e9ef, 0x62713d, 1.82));
 
   return { obstacles, sun, villageLife };
 }

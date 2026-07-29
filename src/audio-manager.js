@@ -19,6 +19,11 @@ const VOLUMES = {
   bump: 0.3,
   chal: 0.55,
   ruk: 0.9,
+  cargoCreak: 0.2,
+  ropeTension: 0.18,
+  potRattle: 0.22,
+  woodMove: 0.22,
+  cargoFail: 0.7,
 };
 
 function safeSessionValue(key) {
@@ -54,6 +59,9 @@ export class AudioManager {
     this.driverSources = new Map();
     this.lastDriverPlay = new Map();
     this.pendingDriverCommand = null;
+    this.cargoSource = null;
+    this.cargoTimer = 2.8;
+    this.cargoCueIndex = 0;
 
     this.button.addEventListener("click", () => this.setMuted(!this.muted));
     this.updateButton();
@@ -80,10 +88,49 @@ export class AudioManager {
       await this.resume();
       this.unlocked = this.context.state === "running";
       if (this.unlocked) console.info("[Audio] Audio unlocked");
+      this.createCargoBuffers();
       this.loadAssets();
     } catch {
       console.info("[Audio] FAILED: audio context could not be started");
     }
+  }
+
+  createCargoBuffers() {
+    if (!this.context || this.buffers.has("cargoCreak")) return;
+    const sampleRate = this.context.sampleRate;
+    const definitions = [
+      ["cargoCreak", 0.42, 76, 0.62],
+      ["ropeTension", 0.26, 128, 0.5],
+      ["potRattle", 0.32, 410, 0.34],
+      ["woodMove", 0.38, 98, 0.52],
+      ["cargoFail", 0.82, 185, 0.9],
+    ];
+    definitions.forEach(([name, duration, frequency, noiseAmount]) => {
+      const length = Math.floor(sampleRate * duration);
+      const buffer = this.context.createBuffer(1, length, sampleRate);
+      const data = buffer.getChannelData(0);
+      let filteredNoise = 0;
+      for (let index = 0; index < length; index += 1) {
+        const time = index / sampleRate;
+        const progress = index / length;
+        filteredNoise = filteredNoise * 0.82 + (Math.random() * 2 - 1) * 0.18;
+        const envelope = Math.sin(Math.PI * progress) * Math.exp(-progress * 1.6);
+        const tone = Math.sin(time * frequency * Math.PI * 2);
+        const rattle =
+          name === "potRattle"
+            ? Math.sin(time * 1180 * Math.PI * 2) * (Math.sin(time * 43) > 0.58 ? 1 : 0)
+            : 0;
+        const failureCrack =
+          name === "cargoFail" && progress < 0.24
+            ? (Math.random() * 2 - 1) * (1 - progress / 0.24)
+            : 0;
+        data[index] =
+          (tone * (1 - noiseAmount) + filteredNoise * noiseAmount + rattle * 0.24 + failureCrack)
+          * envelope
+          * 0.72;
+      }
+      this.buffers.set(name, buffer);
+    });
   }
 
   async resume() {
@@ -247,6 +294,41 @@ export class AudioManager {
     return true;
   }
 
+  updateCargo(stability, cargoType, tension, roadRoughness, delta) {
+    if (!this.unlocked || this.movementAmount <= 0.035 || stability >= 98) return;
+    this.cargoTimer -= delta;
+    if (this.cargoTimer > 0 || this.cargoSource) return;
+    const instability = THREEClamp((100 - stability) / 80, 0, 1);
+    let name = "cargoCreak";
+    if (cargoType === "clay" || cargoType === "milk") name = "potRattle";
+    else if (cargoType === "wood") name = "woodMove";
+    else if (tension > 0.52 && this.cargoCueIndex % 2 === 1) name = "ropeTension";
+    const source = this.playOneShot(
+      name,
+      0.28 + instability * 0.72 + roadRoughness * 0.12,
+      0.94 + instability * 0.12,
+    );
+    this.cargoCueIndex += 1;
+    this.cargoTimer = 4.8 - instability * 3.35;
+    if (!source) return;
+    this.cargoSource = source;
+    source.onended = () => {
+      if (this.cargoSource === source) this.cargoSource = null;
+    };
+  }
+
+  playCargoFailure() {
+    if (this.cargoSource) {
+      try {
+        this.cargoSource.stop();
+      } catch {
+        // The cargo cue has already ended.
+      }
+      this.cargoSource = null;
+    }
+    this.playOneShot("cargoFail");
+  }
+
   updateMovement(speed, delta, steering, gaitPlaybackRate, roadRoughness) {
     const movement = Math.min(Math.abs(speed) / MAX_CART_SPEED, 1);
     this.movementAmount = movement;
@@ -284,6 +366,11 @@ export class AudioManager {
       failed: [...this.failed],
       loops,
       events: { ...this.events },
+      cargoCueActive: Boolean(this.cargoSource),
     };
   }
+}
+
+function THREEClamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }

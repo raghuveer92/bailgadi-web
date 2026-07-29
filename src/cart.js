@@ -14,6 +14,8 @@ const DARK_WOOD = mat(0x3e2115);
 const IRON = mat(0x302b27, 0.72);
 const HIDE = mat(0xe8dfc6);
 const HIDE_GREY = mat(0xc8c3b4);
+const HIDE_WARM = mat(0xd8c6a2);
+const HIDE_PATCH = mat(0x8d7255);
 const HORN = mat(0xf0e5c7);
 const DARK = mat(0x302a24);
 const ROPE = mat(0xa8844e);
@@ -22,6 +24,22 @@ const KURTA = mat(0xd9a33b);
 const TURBAN = mat(0xb83f2f);
 const SKIN = mat(0x9b5f36);
 const WHITE = mat(0xeee3c8);
+const SACK = mat(0xc8a96b);
+const SACK_DARK = mat(0xa98650);
+const MILK = mat(0xbfc6c2, 0.48);
+const MILK_DARK = mat(0x717a76, 0.52);
+const CLAY = mat(0xb96036);
+const CLAY_DARK = mat(0x74351f);
+const LEAF = mat(0x558441);
+const VEGETABLE = mat(0xd88735);
+const CONTACT_SHADOW = new THREE.MeshBasicMaterial({
+  color: 0x33271b,
+  transparent: true,
+  opacity: 0.18,
+  depthWrite: false,
+  toneMapped: false,
+});
+const CONTACT_SHADOW_GEOMETRY = new THREE.CircleGeometry(1, 16);
 
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
@@ -80,7 +98,7 @@ function createLeg(x, z, coat, diagonalPhase) {
   knee.add(lower, fetlock, hoof);
   hip.add(knee);
 
-  return { root: hip, knee, diagonalPhase };
+  return { root: hip, knee, diagonalPhase, baseY: hip.position.y };
 }
 
 function createBull(x, coat, accent, phaseOffset, animationParts) {
@@ -97,6 +115,11 @@ function createBull(x, coat, accent, phaseOffset, animationParts) {
   torso.scale.set(1.06, 1, 1.04);
   torso.position.set(0, 1.65, -0.12);
   upperBody.add(shadow(torso));
+
+  const sideMark = sphere(x < 0 ? 0.42 : 0.34, x < 0 ? HIDE_WARM : HIDE_PATCH, 7, 5);
+  sideMark.scale.set(0.45, 0.78, 1.18);
+  sideMark.position.set(x < 0 ? -0.69 : 0.69, 1.72, x < 0 ? -0.38 : 0.18);
+  upperBody.add(sideMark);
 
   const chest = sphere(0.72, coat);
   chest.scale.set(1.08, 1.02, 0.92);
@@ -152,11 +175,13 @@ function createBull(x, coat, accent, phaseOffset, animationParts) {
   muzzle.position.set(0, -0.19, 0.68);
   headPivot.add(muzzle);
 
+  const ears = [];
   [-1, 1].forEach((side) => {
     const ear = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 5), coat);
     ear.rotation.z = -side * Math.PI / 2;
     ear.position.set(side * 0.58, 0.12, 0.08);
     headPivot.add(shadow(ear));
+    ears.push(ear);
 
     const horn = createHorn(side);
     headPivot.add(horn);
@@ -193,6 +218,7 @@ function createBull(x, coat, accent, phaseOffset, animationParts) {
     root: bull,
     upperBody,
     head: headPivot,
+    ears,
     legs,
     tail: tailPivot,
     reinAnchor,
@@ -250,21 +276,24 @@ function createDriver() {
   neck.position.y = 1.39;
   driver.add(neck);
 
+  const headPivot = new THREE.Group();
+  headPivot.position.y = 1.72;
+  driver.add(headPivot);
+
   const head = sphere(0.34, SKIN, 8, 6);
   head.scale.set(0.9, 1.06, 0.92);
-  head.position.y = 1.72;
-  driver.add(head);
+  headPivot.add(head);
 
   const turbanBase = cylinder(0.39, 0.4, 0.28, 9, TURBAN);
-  turbanBase.position.y = 2.02;
-  driver.add(turbanBase);
+  turbanBase.position.y = 0.3;
+  headPivot.add(turbanBase);
   const turbanTop = sphere(0.33, TURBAN, 8, 5);
   turbanTop.scale.set(1.02, 0.58, 1.02);
-  turbanTop.position.y = 2.2;
-  driver.add(turbanTop);
+  turbanTop.position.y = 0.48;
+  headPivot.add(turbanTop);
   const turbanFold = box(0.1, 0.38, 0.05, mat(0xe8b34d));
-  turbanFold.position.set(0, 2.08, 0.37);
-  driver.add(turbanFold);
+  turbanFold.position.set(0, 0.36, 0.37);
+  headPivot.add(turbanFold);
 
   const leftShoulder = new THREE.Vector3(-0.43, 1.13, 0.05);
   const rightShoulder = new THREE.Vector3(0.43, 1.13, 0.05);
@@ -303,6 +332,7 @@ function createDriver() {
 
   return {
     group: driver,
+    head: headPivot,
     arms: [leftArm.arm, rightArm.arm],
     handAnchors: [leftArm.handAnchor, rightArm.handAnchor],
   };
@@ -344,15 +374,96 @@ function addCartBody(sprungGroup) {
     sprungGroup.add(slat);
   }
 
-  const sack = sphere(0.67, mat(0xc8a96b));
-  sack.scale.set(1.2, 0.65, 1);
-  sack.position.set(0.73, 1.94, -2.45);
-  sprungGroup.add(sack);
+}
 
-  const cloth = box(1.08, 0.08, 1.35, CLOTH);
-  cloth.rotation.y = 0.17;
-  cloth.position.set(-0.72, 1.72, -2.72);
-  sprungGroup.add(cloth);
+function createCargoLoad() {
+  const root = new THREE.Group();
+  root.name = "CargoSpringRoot";
+  root.position.set(0, 1.72, -2.2);
+  const groups = {};
+
+  const rice = new THREE.Group();
+  [
+    [-0.72, 0.28, -0.52, -0.08],
+    [0.68, 0.28, -0.5, 0.1],
+    [-0.36, 0.34, 0.48, 0.06],
+    [0.58, 0.32, 0.45, -0.1],
+  ].forEach(([x, y, z, rotation]) => {
+    const sack = sphere(0.55, Math.abs(x) > 0.6 ? SACK_DARK : SACK);
+    sack.scale.set(1.05, 0.62, 0.88);
+    sack.position.set(x, y, z);
+    sack.rotation.y = rotation;
+    rice.add(sack);
+  });
+  groups.rice = rice;
+
+  const milk = new THREE.Group();
+  [-0.72, 0, 0.72].forEach((x, index) => {
+    const can = new THREE.Group();
+    const body = cylinder(0.3, 0.36, 0.86, 10, MILK);
+    body.position.y = 0.43;
+    const neck = cylinder(0.2, 0.27, 0.22, 10, MILK_DARK);
+    neck.position.y = 0.94;
+    const lid = cylinder(0.22, 0.22, 0.08, 10, MILK);
+    lid.position.y = 1.08;
+    can.position.set(x, 0, index === 1 ? -0.35 : 0.26);
+    can.add(body, neck, lid);
+    milk.add(can);
+  });
+  groups.milk = milk;
+
+  const clay = new THREE.Group();
+  [
+    [-0.68, 0, -0.35, 0.43],
+    [0, 0, 0.28, 0.5],
+    [0.7, 0, -0.25, 0.4],
+  ].forEach(([x, y, z, scale]) => {
+    const pot = new THREE.Group();
+    const belly = sphere(scale, CLAY, 9, 7);
+    belly.scale.y = 0.82;
+    belly.position.y = scale * 0.75;
+    const neck = cylinder(scale * 0.22, scale * 0.38, scale * 0.42, 9, CLAY_DARK);
+    neck.position.y = scale * 1.42;
+    const rim = cylinder(scale * 0.34, scale * 0.34, scale * 0.12, 9, CLAY);
+    rim.position.y = scale * 1.68;
+    pot.position.set(x, y, z);
+    pot.add(belly, neck, rim);
+    clay.add(pot);
+  });
+  groups.clay = clay;
+
+  const vegetables = new THREE.Group();
+  [-0.7, 0.7].forEach((x, sideIndex) => {
+    const crate = box(1.12, 0.46, 1.18, LIGHT_WOOD);
+    crate.position.set(x, 0.24, sideIndex ? 0.2 : -0.22);
+    vegetables.add(crate);
+    for (let index = 0; index < 7; index += 1) {
+      const produce = sphere(0.16 + (index % 2) * 0.025, index % 3 === 0 ? LEAF : VEGETABLE, 7, 5);
+      produce.position.set(
+        x - 0.34 + (index % 3) * 0.32,
+        0.53 + (index % 2) * 0.1,
+        (sideIndex ? 0.2 : -0.22) - 0.28 + Math.floor(index / 3) * 0.28,
+      );
+      vegetables.add(produce);
+    }
+  });
+  groups.vegetables = vegetables;
+
+  const wood = new THREE.Group();
+  [-0.48, 0, 0.48].forEach((x, index) => {
+    const log = cylinder(0.2, 0.24, 2.2, 8, index === 1 ? LIGHT_WOOD : WOOD);
+    log.rotation.x = Math.PI / 2;
+    log.position.set(x, 0.24 + (index === 1 ? 0.34 : 0), 0);
+    wood.add(log);
+  });
+  groups.wood = wood;
+
+  Object.values(groups).forEach((cargoGroup) => {
+    cargoGroup.visible = false;
+    root.add(cargoGroup);
+  });
+  groups.rice.visible = true;
+  return { root, groups };
 }
 
 export function createBullockCart() {
@@ -376,6 +487,10 @@ export function createBullockCart() {
     roadImpactStrength: 0,
     roadImpactSide: 0,
     roadImpactTime: 0,
+    cargoDriverLean: 0,
+    cargoHeadTurn: 0,
+    cargoDriverWorry: 0,
+    cargoReinPull: 0,
   };
 
   const bulls = new THREE.Group();
@@ -401,14 +516,19 @@ export function createBullockCart() {
   const sprungGroup = new THREE.Group();
   sprungGroup.name = "CartBody";
   addCartBody(sprungGroup);
+  const cargo = createCargoLoad();
+  sprungGroup.add(cargo.root);
   const driverParts = createDriver();
   const driver = driverParts.group;
   sprungGroup.add(driver);
   group.add(sprungGroup);
   animationParts.sprungGroup = sprungGroup;
   animationParts.driver = driver;
+  animationParts.driverHead = driverParts.head;
   animationParts.driverArms = driverParts.arms;
   animationParts.driverHandAnchors = driverParts.handAnchors;
+  animationParts.cargoRoot = cargo.root;
+  animationParts.cargoGroups = cargo.groups;
 
   const harness = new THREE.Group();
   harness.name = "YokeAndPoles";
@@ -455,6 +575,26 @@ export function createBullockCart() {
     return anchor;
   });
   animationParts.ropeRein = createRopeReinAnimation(group, animationParts);
+
+  const contactShadows = new THREE.Group();
+  contactShadows.name = "ContactShadows";
+  [
+    [-1.08, -0.01, 4.05, 0.86, 1.62, 0.16],
+    [1.08, -0.01, 4.05, 0.86, 1.62, 0.16],
+    [-2.08, -0.01, -2.06, 0.52, 1.36, 0.13],
+    [2.08, -0.01, -2.06, 0.52, 1.36, 0.13],
+    [0, -0.01, -2.05, 2.05, 1.65, 0.1],
+  ].forEach(([x, y, z, scaleX, scaleZ, opacity]) => {
+    const contact = new THREE.Mesh(CONTACT_SHADOW_GEOMETRY, CONTACT_SHADOW);
+    contact.rotation.x = -Math.PI / 2;
+    contact.position.set(x, y, z);
+    contact.scale.set(scaleX, scaleZ, 1);
+    contact.material = CONTACT_SHADOW.clone();
+    contact.material.opacity = opacity;
+    contact.renderOrder = 1;
+    contactShadows.add(contact);
+  });
+  group.add(contactShadows);
 
   group.traverse((object) => {
     if (object.isMesh) {
@@ -512,6 +652,7 @@ export function animateCart(
 
     bullData.legs.forEach((leg, index) => {
       const stride = Math.sin(phase + leg.diagonalPhase);
+      const footLift = Math.max(0, -stride) * 0.065 * parts.walkBlend;
       const targetSwing =
         stride
         * (0.35 + parts.movementBlend * 0.14)
@@ -533,6 +674,7 @@ export function animateCart(
         1 - Math.exp(-12 * delta),
       );
       leg.root.rotation.x = bullData.legSwing[index];
+      leg.root.position.y = leg.baseY + footLift;
       leg.knee.rotation.x = bullData.kneeBend[index];
     });
 
@@ -542,6 +684,17 @@ export function animateCart(
         * (0.04 + parts.movementBlend * 0.025)
         * parts.walkBlend
       + Math.sin(elapsed * 1.2 + bullData.phaseOffset) * 0.012;
+    bullData.head.rotation.z =
+      Math.sin(phase + bullData.phaseOffset) * 0.018 * parts.walkBlend;
+    bullData.ears.forEach((ear, index) => {
+      const side = index === 0 ? -1 : 1;
+      ear.rotation.y =
+        Math.sin(elapsed * 2.1 + bullData.phaseOffset + index * 1.7)
+        * (0.08 + movement * 0.04);
+      ear.rotation.z =
+        -side * Math.PI / 2
+        + side * Math.sin(elapsed * 1.65 + index) * 0.035;
+    });
 
     const tailAmount = 0.12 + movement * 0.2;
     bullData.tail.rotation.z =
@@ -629,9 +782,23 @@ export function animateCart(
   parts.driver.rotation.x =
     -parts.suspensionY * 0.65
     - parts.suspensionPitch * 0.45
-    + parts.driverReaction;
+    + parts.driverReaction
+    + parts.cargoDriverLean;
   parts.driver.rotation.z = -parts.suspensionRoll * 0.75;
-  parts.driver.position.y = 1.88 + Math.sin(elapsed * 1.4) * 0.006;
+  parts.driver.position.y =
+    1.88
+    + parts.suspensionY * 0.24
+    + Math.abs(Math.sin(gaitPhase)) * 0.018 * parts.movementBlend
+    + Math.sin(elapsed * 1.4) * 0.006;
+  parts.driverHead.rotation.x =
+    -parts.driverReaction * 0.28
+    + Math.sin(elapsed * 2.2) * 0.014 * parts.movementBlend
+    + parts.cargoDriverWorry * 0.035;
+  parts.driverHead.rotation.y = parts.cargoHeadTurn;
+  parts.driverHead.rotation.z =
+    -parts.suspensionRoll * 0.4
+    + Math.sin(elapsed * 1.75 + 0.6) * 0.012 * parts.movementBlend
+    + parts.cargoDriverWorry * 0.045;
   updateRopeReinAnimation(parts.ropeRein, {
     speed,
     maxSpeed: MAX_CART_SPEED,
@@ -641,6 +808,9 @@ export function animateCart(
     suspensionY: parts.suspensionY,
     suspensionRoll: parts.suspensionRoll,
     suspensionPitch: parts.suspensionPitch,
+  });
+  parts.driverArms.forEach((arm) => {
+    arm.rotation.x += parts.cargoReinPull;
   });
 }
 
@@ -654,6 +824,10 @@ export function triggerCartBump(parts, intensity = 1, side = 0) {
   parts.roadImpactStrength = Math.max(parts.roadImpactStrength, 0.11 * intensity);
   parts.roadImpactSide = side || (Math.random() > 0.5 ? 0.35 : -0.35);
   parts.roadImpactTime = 0;
+  parts.cargoDriverLean = 0;
+  parts.cargoHeadTurn = 0;
+  parts.cargoDriverWorry = 0;
+  parts.cargoReinPull = 0;
 }
 
 export function resetCartAnimation(parts) {
@@ -680,7 +854,9 @@ export function resetCartAnimation(parts) {
     bull.kneeBend.fill(0);
     bull.upperBody.position.y = 0;
     bull.head.rotation.x = -0.08;
+    bull.head.rotation.z = 0;
     bull.legs.forEach((leg) => {
+      leg.root.position.y = leg.baseY;
       leg.root.rotation.x = 0;
       leg.knee.rotation.x = 0;
     });
@@ -690,6 +866,7 @@ export function resetCartAnimation(parts) {
   parts.sprungGroup.rotation.z = 0;
   parts.driver.rotation.set(0, 0, 0);
   parts.driver.position.y = 1.88;
+  parts.driverHead.rotation.set(0, 0, 0);
   parts.driverArms.forEach((arm) => arm.rotation.set(0, 0, 0));
   resetRopeReinAnimation(parts.ropeRein);
 }

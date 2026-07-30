@@ -373,6 +373,7 @@ function createEventVisual(type) {
 const ROUTE_BRANCH_SEGMENTS = 14;
 const ROUTE_BRANCH_LENGTH = 52;
 const ROUTE_BRANCH_OFFSET = 12;
+const JUNCTION_BLEND_LENGTH = 18;
 const MAX_DIRECTION_VILLAGERS = MAX_ROUTE_JUNCTIONS * 3;
 
 function createDirectionVillager() {
@@ -985,12 +986,21 @@ export function createRoadGameplay(scene) {
   const eventRouteSample = {};
 
   const junctionVisuals = new Array(MAX_ROUTE_JUNCTIONS);
-  const branchGeometry = new THREE.BoxGeometry(1, 1, 1);
+  const branchGeometry = new THREE.PlaneGeometry(1, 1);
+  branchGeometry.rotateX(-Math.PI / 2);
+  const junctionGeometry = new THREE.CircleGeometry(1, 32);
+  junctionGeometry.rotateX(-Math.PI / 2);
   for (let index = 0; index < MAX_ROUTE_JUNCTIONS; index += 1) {
     const junctionGroup = new THREE.Group();
     junctionGroup.name = `MissionJunction${index + 1}`;
     const left = new Array(ROUTE_BRANCH_SEGMENTS);
     const right = new Array(ROUTE_BRANCH_SEGMENTS);
+    const blend = prepareMesh(
+      new THREE.Mesh(junctionGeometry, ROUTE_BRANCH),
+      false,
+    );
+    blend.visible = false;
+    junctionGroup.add(blend);
     for (let segment = 0; segment < ROUTE_BRANCH_SEGMENTS; segment += 1) {
       const leftRoad = prepareMesh(
         new THREE.Mesh(branchGeometry, ROUTE_BRANCH),
@@ -1008,7 +1018,7 @@ export function createRoadGameplay(scene) {
     }
     junctionGroup.visible = false;
     routeNetworkGroup.add(junctionGroup);
-    junctionVisuals[index] = { group: junctionGroup, left, right };
+    junctionVisuals[index] = { group: junctionGroup, blend, left, right };
   }
 
   const directionVillagers = new Array(MAX_DIRECTION_VILLAGERS);
@@ -1249,8 +1259,9 @@ export function createRoadGameplay(scene) {
       0,
       1,
     );
+    const smoothProgress = progress * progress * (3 - 2 * progress);
     const side = direction === "LEFT" ? 1 : -1;
-    return Math.sin(progress * Math.PI) * ROUTE_BRANCH_OFFSET * side;
+    return Math.sin(smoothProgress * Math.PI) * ROUTE_BRANCH_OFFSET * side;
   }
 
   function configureBranch(
@@ -1299,16 +1310,26 @@ export function createRoadGameplay(scene) {
       );
       const deltaX = endX - startX;
       const deltaZ = endZ - startZ;
+      const branchProgress = (segment + 0.5) / meshes.length;
+      const separation = Math.sin(branchProgress * Math.PI);
+      const roadWidth = (
+        junctionSampleA.width + junctionSampleB.width
+      ) * 0.5;
+      const branchWidth = THREE.MathUtils.lerp(
+        roadWidth * 0.64,
+        Math.max(5.8, roadWidth * 0.42),
+        separation,
+      );
       mesh.position.set(
         (startX + endX) * 0.5,
-        (junctionSampleA.centerY + junctionSampleB.centerY) * 0.5 + 0.025,
+        (junctionSampleA.centerY + junctionSampleB.centerY) * 0.5 + 0.069,
         (startZ + endZ) * 0.5,
       );
       mesh.rotation.set(0, Math.atan2(deltaX, deltaZ), 0);
       mesh.scale.set(
-        Math.max(5.2, junctionSampleA.width * 0.38),
-        0.045,
-        Math.hypot(deltaX, deltaZ) + 0.55,
+        branchWidth,
+        1,
+        Math.hypot(deltaX, deltaZ) + 0.72,
       );
     }
   }
@@ -1367,6 +1388,7 @@ export function createRoadGameplay(scene) {
       const visual = junctionVisuals[index];
       const active = index < count && descriptor.active;
       visual.group.visible = active;
+      visual.blend.visible = active;
       let hasLeft = false;
       let hasRight = false;
       if (active) {
@@ -1379,6 +1401,28 @@ export function createRoadGameplay(scene) {
           if (route.direction === "LEFT") hasLeft = true;
           else if (route.direction === "RIGHT") hasRight = true;
         }
+      }
+      if (active) {
+        routeSampler(
+          descriptor.routeDistance + JUNCTION_BLEND_LENGTH * 0.2,
+          difficulty,
+          junctionSampleA,
+        );
+        visual.blend.position.set(
+          junctionSampleA.centerX,
+          junctionSampleA.centerY + 0.068,
+          junctionSampleA.centerZ,
+        );
+        visual.blend.rotation.set(
+          0,
+          Math.atan2(junctionSampleA.tangentX, junctionSampleA.tangentZ),
+          0,
+        );
+        visual.blend.scale.set(
+          junctionSampleA.width * 0.57,
+          1,
+          JUNCTION_BLEND_LENGTH * 0.44,
+        );
       }
       configureBranch(
         visual.left,

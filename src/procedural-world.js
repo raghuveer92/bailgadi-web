@@ -47,10 +47,10 @@ const MAX_EVENT_PEOPLE = 20;
 const OBSTACLES_PER_CHUNK = 10;
 const WORLD_HALF_WIDTH = 135;
 const HAZARD_START_CLEARANCE = 58;
-const HAZARD_DESTINATION_CLEARANCE = 24;
+const HAZARD_DESTINATION_CLEARANCE = 70;
 const HAZARD_CHECKPOINT_CLEARANCE = 14;
 const EVENT_START_CLEARANCE = 62;
-const EVENT_DESTINATION_CLEARANCE = 30;
+const EVENT_DESTINATION_CLEARANCE = 70;
 const EVENT_CHECKPOINT_CLEARANCE = 18;
 const EVENT_HAZARD_CLEARANCE = 2.5;
 
@@ -1727,7 +1727,7 @@ export class EnvironmentGenerator {
     prepareDynamicGeometry(chunk.ground);
   }
 
-  configureTrees(chunk, chunkIndex, theme, regionDefinition) {
+  configureTrees(chunk, chunkIndex, difficulty, theme, regionDefinition) {
     const count = Math.min(
       MAX_TREES,
       Math.max(1, Math.round(theme.trees * regionDefinition.treeFactor)),
@@ -1754,7 +1754,26 @@ export class EnvironmentGenerator {
         scale,
       );
       chunk.treeCrowns.setMatrixAt(index, this.scratch.matrix);
-      if (index < OBSTACLES_PER_CHUNK && Math.abs(x) < 29) {
+      const treeRoadCenter = (
+        chunkCenterOffset(this.seed, z, difficulty)
+        + localRoadOffset(
+          roadLayoutIndexFor(this.seed, chunkIndex, difficulty),
+          (z - chunkIndex * CHUNK_LENGTH) / CHUNK_LENGTH,
+          difficulty,
+        )
+      );
+      const treeRoadWidth = roadWidthAt(
+        this.seed,
+        chunkIndex,
+        roadLayoutIndexFor(this.seed, chunkIndex, difficulty),
+        (z - chunkIndex * CHUNK_LENGTH) / CHUNK_LENGTH,
+        difficulty,
+      );
+      if (
+        index < OBSTACLES_PER_CHUNK
+        && Math.abs(x - treeRoadCenter) > treeRoadWidth * 0.5 + 3
+        && Math.abs(x) < 29
+      ) {
         const obstacle = this.obstaclePool[chunk.obstacleStart + index];
         obstacle.x = x;
         obstacle.z = z;
@@ -1863,16 +1882,19 @@ export class EnvironmentGenerator {
       );
       chunk.rocks.setMatrixAt(index, this.scratch.matrix);
     }
+    let placedPropCount = 0;
     for (let index = 0; index < propCount; index += 1) {
       const side = index % 2 ? 1 : -1;
       const x = side * (11.5 + hash01(this.seed, chunkIndex, 1360 + index) * 8);
       const z = startZ + 2 + hash01(this.seed, chunkIndex, 1420 + index) * (CHUNK_LENGTH - 4);
       const type = hashUint(this.seed, chunkIndex, 1480 + index) % 5;
+      if (type !== 1) continue;
       const sx = type === 0 ? 0.32 : type === 1 ? 1.8 : type === 2 ? 0.8 : 0.55;
       const sy = type === 0 ? 1.6 : type === 1 ? 0.18 : type === 2 ? 0.65 : 0.85;
       const sz = type === 0 ? 1 : type === 1 ? 2.2 : type === 2 ? 0.8 : 1.2;
       setTransform(this.scratch, x, sy * 0.5, z, 0, sx, sy, sz);
-      chunk.roadsideProps.setMatrixAt(index, this.scratch.matrix);
+      chunk.roadsideProps.setMatrixAt(placedPropCount, this.scratch.matrix);
+      placedPropCount += 1;
     }
     for (let index = 0; index < potCount; index += 1) {
       const side = index % 2 ? 1 : -1;
@@ -1899,7 +1921,7 @@ export class EnvironmentGenerator {
     chunk.fullGrassCount = grassCount;
     chunk.fullBushCount = bushCount;
     chunk.fullRockCount = rockCount;
-    chunk.fullPropCount = propCount;
+    chunk.fullPropCount = placedPropCount;
     chunk.fullPotCount = potCount;
     chunk.fullWoodPileCount = woodPileCount;
     chunk.fullSignCount = signCount;
@@ -1911,7 +1933,7 @@ export class EnvironmentGenerator {
     finalizeInstances(chunk.grass, grassCount);
     finalizeInstances(chunk.bushes, bushCount);
     finalizeInstances(chunk.rocks, rockCount);
-    finalizeInstances(chunk.roadsideProps, propCount);
+    finalizeInstances(chunk.roadsideProps, placedPropCount);
     finalizeInstances(chunk.pots, potCount);
     finalizeInstances(chunk.woodPiles, woodPileCount);
     finalizeInstances(chunk.signs, signCount);
@@ -1987,7 +2009,13 @@ export class EnvironmentGenerator {
       obstacle.radius = 0;
     }
     this.fillGround(chunk, chunkIndex);
-    this.configureTrees(chunk, chunkIndex, theme, regionDefinition);
+    this.configureTrees(
+      chunk,
+      chunkIndex,
+      difficulty,
+      theme,
+      regionDefinition,
+    );
     this.configureCrops(chunk, chunkIndex, themeIndex, theme, regionDefinition);
     this.configureRoadside(
       chunk,

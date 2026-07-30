@@ -39,8 +39,8 @@ const ROAD_LIMIT_WIDTH_RESPONSE = 2.4;
 const ROAD_EXCESS_RETURN_RESPONSE = 1.2;
 const ROAD_OFF_ROAD_RESISTANCE_MIN = 0.025;
 const ROAD_OFF_ROAD_RESISTANCE_MAX = 0.08;
-const DESTINATION_ROUTE_TOLERANCE = 5;
-const DESTINATION_LATERAL_TOLERANCE = 3.4;
+const DESTINATION_ROUTE_TOLERANCE = 10;
+const DESTINATION_LATERAL_TOLERANCE_MIN = 5;
 const ROUTE_BRANCH_LENGTH = 52;
 const ROUTE_BRANCH_OFFSET = 12;
 const ROUTE_CHOICE_DISTANCE = 6;
@@ -385,9 +385,6 @@ const missionMarkerState = {
   destinationWorldPosition: { x: 0, y: 0, z: 0 },
   destinationNormalX: 1,
   destinationNormalZ: 0,
-  distanceToDestinationByRoute: 0,
-  lateralDistanceFromDestination: 0,
-  arrivalZoneActive: false,
   nextCheckpointIndex: 0,
   nextCheckpointWorldPosition: { x: 0, y: 0, z: 0 },
   nextCheckpointTriggered: false,
@@ -425,8 +422,17 @@ const villageState = {
   activeVillageName: "None",
   activeVillagerCount: 0,
   activeAnimalCount: 0,
+};
+const deliveryState = {
+  destinationRouteId: "None",
+  deliveryRouteDistance: 0,
+  currentRouteId: "None",
+  routeDistanceDifference: Number.POSITIVE_INFINITY,
+  lateralDistance: Number.POSITIVE_INFINITY,
+  withinDeliveryZone: false,
   deliveryInteractionAvailable: false,
-  deliveryCompleted: false,
+  completionEligible: false,
+  completed: false,
 };
 const routeState = {
   currentRouteDistance: 0,
@@ -437,7 +443,6 @@ const routeState = {
   remainingRouteDistance: MISSIONS[0].distance,
   missionProgressRatio: 0,
   nextCheckpointRouteDistance: 0,
-  completionEligible: false,
   chunkIndex: 0,
   localDistance: 0,
 };
@@ -616,6 +621,10 @@ function smoothstep01(value) {
   return clamped * clamped * (3 - 2 * clamped);
 }
 
+function smoothBranchProgress(value) {
+  return smoothstep01(value);
+}
+
 function missionStartZ() {
   return MISSION_END_Z - state.mission.distance;
 }
@@ -721,12 +730,15 @@ function applyNavigationRouteSample(sample, worldX) {
     1,
   );
   const side = navigationState.branchDirection === "LEFT" ? 1 : -1;
-  const offset = Math.sin(progress * Math.PI) * ROUTE_BRANCH_OFFSET * side;
+  const smoothProgress = smoothBranchProgress(progress);
+  const offset = Math.sin(smoothProgress * Math.PI) * ROUTE_BRANCH_OFFSET * side;
+  const progressSlope = 6 * progress * (1 - progress);
   const offsetSlope = (
-    Math.cos(progress * Math.PI)
+    Math.cos(smoothProgress * Math.PI)
     * Math.PI
     * ROUTE_BRANCH_OFFSET
     * side
+    * progressSlope
     / ROUTE_BRANCH_LENGTH
   );
   const normalX = sample.tangentZ;
@@ -882,10 +894,16 @@ function rebuildMissionRouteMarkers() {
   );
   missionMarkerState.destinationNormalX = missionRouteSample.normalX;
   missionMarkerState.destinationNormalZ = missionRouteSample.normalZ;
-  missionMarkerState.distanceToDestinationByRoute =
-    routeState.requiredRouteDistance;
-  missionMarkerState.lateralDistanceFromDestination = 0;
-  missionMarkerState.arrivalZoneActive = false;
+  deliveryState.destinationRouteId = missionRouteNetwork.destinationRouteId;
+  deliveryState.deliveryRouteDistance =
+    villageDescriptor.deliveryPoint.routeDistance;
+  deliveryState.currentRouteId = navigationState.currentRouteId;
+  deliveryState.routeDistanceDifference = routeState.requiredRouteDistance;
+  deliveryState.lateralDistance = Number.POSITIVE_INFINITY;
+  deliveryState.withinDeliveryZone = false;
+  deliveryState.deliveryInteractionAvailable = false;
+  deliveryState.completionEligible = false;
+  deliveryState.completed = false;
 
   for (let index = 0; index < CHECKPOINTS.length; index += 1) {
     const checkpointState = checkpointMarkerStates[index];
@@ -933,8 +951,6 @@ function rebuildVillage() {
   villageState.activeVillageName = "None";
   villageState.activeVillagerCount = 0;
   villageState.activeAnimalCount = 0;
-  villageState.deliveryInteractionAvailable = false;
-  villageState.deliveryCompleted = false;
   deliveryInteractionButton.classList.add("hidden");
 }
 
@@ -1101,7 +1117,6 @@ function initializeMissionRoute() {
   routeState.travelledRouteDistance = 0;
   routeState.remainingRouteDistance = routeState.requiredRouteDistance;
   routeState.missionProgressRatio = 0;
-  routeState.completionEligible = false;
   routeState.chunkIndex = currentRoadSample.chunkIndex;
   routeState.localDistance = currentRoadSample.localDistance;
   state.progress = 0;
@@ -1271,15 +1286,15 @@ function showVillageToast(message) {
 function confirmDelivery() {
   if (
     state.journeyStatus !== "playing"
-    || !villageState.deliveryInteractionAvailable
-    || villageState.deliveryCompleted
+    || !deliveryState.deliveryInteractionAvailable
+    || deliveryState.completed
   ) {
     return;
   }
-  villageState.deliveryCompleted = true;
-  villageState.deliveryInteractionAvailable = false;
+  deliveryState.completed = true;
+  deliveryState.deliveryInteractionAvailable = false;
+  deliveryState.completionEligible = true;
   villageState.reachedShown = true;
-  routeState.completionEligible = true;
   deliveryInteractionButton.classList.add("hidden");
   showVillageToast("Goods Delivered Successfully");
   beginJourneyFinish();
@@ -1290,7 +1305,7 @@ function beginJourneyFinish() {
   state.progress = routeState.requiredRouteDistance;
   routeState.remainingRouteDistance = 0;
   routeState.missionProgressRatio = 1;
-  routeState.completionEligible = true;
+  deliveryState.completionEligible = true;
   state.journeyStatus = "finishing";
   controls.resetAll();
   controls.setEnabled(false);
@@ -1559,7 +1574,7 @@ function updateJourneyProgress() {
   }
   updateNextCheckpointRouteDistance();
   const routeDistanceFromDestination = Math.abs(
-    routeState.targetRouteDistance - routeState.currentRouteDistance,
+    deliveryState.deliveryRouteDistance - routeState.currentRouteDistance,
   );
   const destinationDeltaX = (
     cart.position.x - missionMarkerState.destinationWorldPosition.x
@@ -1571,36 +1586,36 @@ function updateJourneyProgress() {
     destinationDeltaX * missionMarkerState.destinationNormalX
     + destinationDeltaZ * missionMarkerState.destinationNormalZ
   );
-  missionMarkerState.distanceToDestinationByRoute =
-    routeDistanceFromDestination;
-  missionMarkerState.lateralDistanceFromDestination =
-    destinationLateralDistance;
-  missionMarkerState.arrivalZoneActive = (
+  const deliveryLateralTolerance = Math.max(
+    DESTINATION_LATERAL_TOLERANCE_MIN,
+    currentRoadSample.width * 0.42,
+  );
+  deliveryState.destinationRouteId = missionRouteNetwork.destinationRouteId;
+  deliveryState.currentRouteId = navigationState.currentRouteId;
+  deliveryState.routeDistanceDifference = routeDistanceFromDestination;
+  deliveryState.lateralDistance = destinationLateralDistance;
+  deliveryState.withinDeliveryZone = (
     routeDistanceFromDestination <= DESTINATION_ROUTE_TOLERANCE
-    && destinationLateralDistance <= DESTINATION_LATERAL_TOLERANCE
+    && destinationLateralDistance <= deliveryLateralTolerance
   );
   const deliveryRouteEligible = (
-    routeState.currentRouteDistance >= routeState.targetRouteDistance
-    && !navigationState.isOnWrongRoute
-    && (
-      navigationState.currentRouteId
-      === missionRouteNetwork.destinationRouteId
-    )
+    !navigationState.isOnWrongRoute
+    && deliveryState.currentRouteId === deliveryState.destinationRouteId
     && (
       navigationState.destinationVillageId
       === state.mission.destinationVillageId
     )
-    && missionMarkerState.arrivalZoneActive
+    && deliveryState.withinDeliveryZone
   );
-  villageState.deliveryInteractionAvailable = (
-    deliveryRouteEligible && !villageState.deliveryCompleted
+  deliveryState.deliveryInteractionAvailable = (
+    deliveryRouteEligible && !deliveryState.completed
   );
   deliveryInteractionButton.classList.toggle(
     "hidden",
-    !villageState.deliveryInteractionAvailable,
+    !deliveryState.deliveryInteractionAvailable,
   );
-  routeState.completionEligible = (
-    deliveryRouteEligible && villageState.deliveryCompleted
+  deliveryState.completionEligible = (
+    deliveryRouteEligible && deliveryState.completed
   );
 }
 
@@ -1991,9 +2006,9 @@ function updateMovementDebug(delta) {
   movementDebug.activeVillageAnimals.textContent =
     String(villageState.activeAnimalCount);
   movementDebug.deliveryAvailable.textContent =
-    villageState.deliveryInteractionAvailable ? "YES" : "NO";
+    deliveryState.deliveryInteractionAvailable ? "YES" : "NO";
   movementDebug.deliveryCompleted.textContent =
-    villageState.deliveryCompleted ? "YES" : "NO";
+    deliveryState.completed ? "YES" : "NO";
 }
 
 function updateHud() {
@@ -2123,11 +2138,12 @@ function updateHud() {
         nextCheckpointRouteDistance: Number(
           routeState.nextCheckpointRouteDistance.toFixed(3),
         ),
-        completionEligible: routeState.completionEligible,
+        completionEligible: deliveryState.completionEligible,
         chunkIndex: routeState.chunkIndex,
         localDistance: Number(routeState.localDistance.toFixed(3)),
       },
       missionMarkers: missionMarkerState,
+      delivery: deliveryState,
       proceduralHazards: hazardState,
       proceduralEvents: eventState,
       navigation: navigationState,
@@ -2238,7 +2254,6 @@ function replayGame() {
   routeState.remainingRouteDistance = state.mission.distance;
   routeState.missionProgressRatio = 0;
   routeState.nextCheckpointRouteDistance = 0;
-  routeState.completionEligible = false;
   routeState.chunkIndex = 0;
   routeState.localDistance = 0;
   cart.position.set(START_X, 0.05, missionStartZ());
@@ -2271,7 +2286,7 @@ askDirectionButton.addEventListener("click", askVillagerForDirection);
 deliveryInteractionButton.addEventListener("click", confirmDelivery);
 window.addEventListener("keydown", (event) => {
   if (event.code !== "KeyE" || event.repeat) return;
-  if (villageState.deliveryInteractionAvailable) {
+  if (deliveryState.deliveryInteractionAvailable) {
     event.preventDefault();
     confirmDelivery();
     return;
@@ -2355,12 +2370,13 @@ window.__bailgadi = {
         remainingRouteDistance: routeState.remainingRouteDistance,
         missionProgressRatio: routeState.missionProgressRatio,
         nextCheckpointRouteDistance: routeState.nextCheckpointRouteDistance,
-        completionEligible: routeState.completionEligible,
+        completionEligible: deliveryState.completionEligible,
         chunkIndex: routeState.chunkIndex,
         localDistance: routeState.localDistance,
       }
       : undefined,
     missionMarkers: import.meta.env.DEV ? missionMarkerState : undefined,
+    delivery: import.meta.env.DEV ? deliveryState : undefined,
     proceduralHazards: import.meta.env.DEV ? hazardState : undefined,
     proceduralEvents: import.meta.env.DEV ? eventState : undefined,
     navigation: import.meta.env.DEV ? navigationState : undefined,

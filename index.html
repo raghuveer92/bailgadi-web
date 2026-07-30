@@ -118,6 +118,12 @@
             <div><span>LOD Level:</span><strong id="procedural-debug-lod">LOD 0</strong></div>
             <div><span>Draw Calls:</span><strong id="procedural-debug-draw-calls">0</strong></div>
             <div><span>FPS:</span><strong id="procedural-debug-fps">60</strong></div>
+            <div class="voice-debug-summary"><span>Living Village</span><strong></strong></div>
+            <div><span>Active Village:</span><strong id="village-debug-name">None</strong></div>
+            <div><span>Active Villagers:</span><strong id="village-debug-villagers">0</strong></div>
+            <div><span>Active Animals:</span><strong id="village-debug-animals">0</strong></div>
+            <div><span>Delivery Available:</span><strong id="village-debug-delivery-available">NO</strong></div>
+            <div><span>Delivery Completed:</span><strong id="village-debug-delivery-completed">NO</strong></div>
             <p id="voice-trigger-notice" class="voice-trigger-notice" aria-live="polite"></p>
             <p>Last detected: <strong id="voice-last-detected">None</strong></p>
           </div>
@@ -127,6 +133,9 @@
       <div id="checkpoint-message" class="checkpoint-message hidden" role="status"></div>
       <button id="ask-direction-button" class="ask-direction hidden" type="button">
         <span>Ask</span><kbd>E</kbd>
+      </button>
+      <button id="delivery-interaction-button" class="ask-direction hidden" type="button">
+        <span>Deliver Goods</span><kbd>E</kbd>
       </button>
       <div id="direction-dialogue" class="direction-dialogue hidden" role="status" aria-live="polite">
         <p id="direction-driver-line"></p>

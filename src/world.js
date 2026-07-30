@@ -55,6 +55,9 @@ export function createWorld(scene) {
     sampleRouteDistance: (routeDistance, difficulty = 1, target = {}) => (
       worldGenerator.sampleRouteDistance(routeDistance, difficulty, target)
     ),
+    getRegionAtRouteDistance: (routeDistance, target = {}) => (
+      worldGenerator.getRegionAtRouteDistance(routeDistance, target)
+    ),
     generateHazardDescriptors: (
       startRouteDistance,
       targetRouteDistance,
@@ -101,6 +104,19 @@ export function createWorld(scene) {
       destinationVillageName,
       targetJunctions,
       targetMissionRoute,
+    ),
+    generateVillage: (
+      routeDistance,
+      difficulty,
+      missionKey,
+      preferredName,
+      targetVillage,
+    ) => worldGenerator.generateVillage(
+      routeDistance,
+      difficulty,
+      missionKey,
+      preferredName,
+      targetVillage,
     ),
   };
 }

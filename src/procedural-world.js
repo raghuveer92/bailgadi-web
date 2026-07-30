@@ -80,6 +80,62 @@ const THEME_DEFINITIONS = Object.freeze([
   { name: "Village Centre", color: 0x8e9b53, crop: 0xb0a95e, trees: 9, crops: 0 },
 ]);
 
+export const REGION_TYPES = Object.freeze([
+  "Farming",
+  "Forest",
+  "Riverside",
+  "Dry Plains",
+  "Rocky Area",
+]);
+
+const REGION_DEFINITIONS = Object.freeze({
+  Farming: Object.freeze({
+    climate: "temperate",
+    tint: 0xa8cee0,
+    themes: Object.freeze([0, 1, 8, 9]),
+    treeFactor: 0.8,
+    cropFactor: 1.25,
+    bushFactor: 0.8,
+    rockFactor: 0.55,
+  }),
+  Forest: Object.freeze({
+    climate: "cool-humid",
+    tint: 0x93bcc8,
+    themes: Object.freeze([3, 4, 5]),
+    treeFactor: 1.35,
+    cropFactor: 0.15,
+    bushFactor: 1.2,
+    rockFactor: 1.05,
+  }),
+  Riverside: Object.freeze({
+    climate: "humid",
+    tint: 0x9fcbd8,
+    themes: Object.freeze([6, 7, 1]),
+    treeFactor: 1,
+    cropFactor: 0.65,
+    bushFactor: 1,
+    rockFactor: 0.65,
+  }),
+  "Dry Plains": Object.freeze({
+    climate: "hot-dry",
+    tint: 0xd5c59f,
+    themes: Object.freeze([2, 4]),
+    treeFactor: 0.38,
+    cropFactor: 0.08,
+    bushFactor: 0.7,
+    rockFactor: 0.75,
+  }),
+  "Rocky Area": Object.freeze({
+    climate: "dry-highland",
+    tint: 0xb8b9ae,
+    themes: Object.freeze([2, 5]),
+    treeFactor: 0.45,
+    cropFactor: 0.05,
+    bushFactor: 0.55,
+    rockFactor: 1.8,
+  }),
+});
+
 const VILLAGE_NAMES = Object.freeze([
   "Rampur",
   "Sundarpur",
@@ -89,6 +145,21 @@ const VILLAGE_NAMES = Object.freeze([
   "Amarpura",
   "Sonwadi",
   "Kesarwadi",
+]);
+
+const VILLAGE_THEMES = Object.freeze([
+  "Wheat Hamlet",
+  "Orchard Village",
+  "Riverside Settlement",
+  "Potters' Village",
+]);
+
+const DELIVERY_LOCATIONS = Object.freeze([
+  "Grain Market",
+  "Village Shop",
+  "Warehouse",
+  "Farmer House",
+  "Milk Collection Centre",
 ]);
 
 const LANDMARKS = Object.freeze([
@@ -181,6 +252,230 @@ function hash01(seed, index, salt = 0) {
   return hashUint(seed, index, salt) / 4294967295;
 }
 
+function regionLengthFor(seed, regionIndex) {
+  return 500 + (hashUint(seed, regionIndex, 3000) % 1501);
+}
+
+function regionTypeIndexFor(seed, regionIndex) {
+  const block = Math.floor(regionIndex / REGION_TYPES.length);
+  const position = (
+    (regionIndex % REGION_TYPES.length) + REGION_TYPES.length
+  ) % REGION_TYPES.length;
+  return (
+    (hashUint(seed, block, 3001) % REGION_TYPES.length) + position
+  ) % REGION_TYPES.length;
+}
+
+function locateRegion(seed, routeDistance, target) {
+  const zeroLength = regionLengthFor(seed, 0);
+  const zeroOffset = hashUint(seed, 0, 3002) % zeroLength;
+  const zeroStart = -zeroOffset;
+  const zeroEnd = zeroStart + zeroLength;
+  let regionIndex = 0;
+  let startRouteDistance = zeroStart;
+  let endRouteDistance = zeroEnd;
+
+  if (routeDistance >= zeroEnd) {
+    regionIndex = 1;
+    startRouteDistance = zeroEnd;
+    while (true) {
+      endRouteDistance = (
+        startRouteDistance + regionLengthFor(seed, regionIndex)
+      );
+      if (routeDistance < endRouteDistance) break;
+      startRouteDistance = endRouteDistance;
+      regionIndex += 1;
+    }
+  } else if (routeDistance < zeroStart) {
+    regionIndex = -1;
+    endRouteDistance = zeroStart;
+    while (true) {
+      startRouteDistance = (
+        endRouteDistance - regionLengthFor(seed, regionIndex)
+      );
+      if (routeDistance >= startRouteDistance) break;
+      endRouteDistance = startRouteDistance;
+      regionIndex -= 1;
+    }
+  }
+
+  target.index = regionIndex;
+  target.startRouteDistance = startRouteDistance;
+  target.endRouteDistance = endRouteDistance;
+  return target;
+}
+
+export function generateRegionDescriptor(seed, routeDistance, target = {}) {
+  locateRegion(seed >>> 0, routeDistance, target);
+  const type = REGION_TYPES[regionTypeIndexFor(seed, target.index)];
+  const regionSeed = hashUint(seed, target.index, 3003);
+  target.id = `region-${target.index < 0 ? `n${-target.index}` : target.index}-${
+    regionSeed.toString(16).padStart(8, "0")
+  }`;
+  target.type = type;
+  target.seed = regionSeed;
+  target.climate = REGION_DEFINITIONS[type].climate;
+  return target;
+}
+
+function regionTypeAtDistance(seed, routeDistance) {
+  const bounds = locateRegion(seed, routeDistance, sharedRegionBounds);
+  return REGION_TYPES[regionTypeIndexFor(seed, bounds.index)];
+}
+
+const sharedRegionBounds = {
+  index: 0,
+  startRouteDistance: 0,
+  endRouteDistance: 0,
+};
+
+function slugifyVillageName(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+export function generateVillageDescriptor(
+  seed,
+  routeDistance,
+  difficulty = 1,
+  missionKey = 0,
+  preferredName = "",
+  target = {},
+  regionDescriptor = null,
+) {
+  const villageSeed = hashUint(seed >>> 0, missionKey, 2400);
+  const name = preferredName || VILLAGE_NAMES[
+    hashUint(villageSeed, missionKey, 2401) % VILLAGE_NAMES.length
+  ];
+  const size = 8 + (hashUint(villageSeed, missionKey, 2402) % 13);
+  const population = Math.min(
+    28,
+    8 + Math.floor(size * 0.7) + (hashUint(villageSeed, missionKey, 2403) % 5),
+  );
+  const entranceDistance = 50 + (hashUint(villageSeed, missionKey, 2404) % 9);
+  const deliverySide = hash01(villageSeed, missionKey, 2405) > 0.5 ? 1 : -1;
+  const deliveryType = DELIVERY_LOCATIONS[
+    hashUint(villageSeed, missionKey, 2406) % DELIVERY_LOCATIONS.length
+  ];
+
+  target.id = `${slugifyVillageName(name)}-${villageSeed.toString(16).padStart(8, "0")}`;
+  target.name = name;
+  target.routeDistance = routeDistance;
+  const regionType = regionDescriptor
+    ? regionDescriptor.type
+    : regionTypeAtDistance(seed, routeDistance);
+  target.theme = regionType === "Farming"
+    ? "Wheat Hamlet"
+    : regionType === "Forest"
+      ? "Orchard Village"
+      : regionType === "Riverside"
+        ? "Riverside Settlement"
+        : VILLAGE_THEMES[
+          hashUint(villageSeed, missionKey, 2407) % VILLAGE_THEMES.length
+        ];
+  target.region = {
+    id: regionDescriptor ? regionDescriptor.id : "generated-region",
+    type: regionType,
+    climate: regionDescriptor
+      ? regionDescriptor.climate
+      : REGION_DEFINITIONS[regionType].climate,
+  };
+  target.size = size;
+  target.seed = villageSeed;
+  target.population = population;
+  target.populationBreakdown = {
+    children: Math.max(2, Math.floor(population * 0.28)),
+    farmers: Math.max(2, Math.floor(population * 0.34)),
+    potCarriers: Math.max(1, Math.floor(population * 0.2)),
+    cattle: 2 + (hashUint(villageSeed, missionKey, 2408) % 3),
+    buffaloes: 1 + (hashUint(villageSeed, missionKey, 2409) % 2),
+  };
+  target.entrance = {
+    routeDistance: routeDistance - entranceDistance,
+    label: `Welcome to ${name}`,
+  };
+  target.square = {
+    routeDistance: routeDistance - 21,
+    radius: 13 + (size > 14 ? 2 : 0),
+  };
+  target.deliveryPoint = {
+    id: `${target.id}-delivery`,
+    type: deliveryType,
+    routeDistance,
+    lateralOffset: deliverySide * (4.2 + hash01(villageSeed, missionKey, 2410) * 1.2),
+  };
+  target.landmark = hash01(villageSeed, missionKey, 2411) > 0.5
+    ? "Temple"
+    : "Banyan Tree";
+  const landmarkSide = deliverySide * -1;
+  target.activityZones = [
+    {
+      id: `${target.id}-square`,
+      type: "village-square",
+      routeDistance: target.square.routeDistance,
+      lateralOffset: 0,
+      radius: target.square.radius,
+    },
+    {
+      id: `${target.id}-tea-stall`,
+      type: "tea-stall",
+      routeDistance: routeDistance - 31,
+      lateralOffset: deliverySide * -10.5,
+      radius: 5,
+    },
+    {
+      id: `${target.id}-landmark`,
+      type: target.landmark === "Temple" ? "temple-area" : "banyan-tree",
+      routeDistance: target.square.routeDistance + 4,
+      lateralOffset: landmarkSide * 10.5,
+      radius: 6,
+    },
+    {
+      id: `${target.id}-well`,
+      type: "well",
+      routeDistance: target.square.routeDistance - 3,
+      lateralOffset: deliverySide * 8.5,
+      radius: 4.5,
+    },
+    {
+      id: `${target.id}-animal-shed`,
+      type: "animal-shed",
+      routeDistance: routeDistance - 13,
+      lateralOffset: deliverySide * -15.5,
+      radius: 6.5,
+    },
+    {
+      id: `${target.id}-market`,
+      type: deliveryType === "Grain Market" ? "grain-market" : "delivery-market",
+      routeDistance: routeDistance - 2,
+      lateralOffset: target.deliveryPoint.lateralOffset,
+      radius: 6,
+    },
+    {
+      id: `${target.id}-houses`,
+      type: "houses",
+      routeDistance: routeDistance - 25,
+      lateralOffset: 0,
+      radius: 28,
+    },
+  ];
+  target.decorationCounts = {
+    trees: Math.min(
+      14,
+      7 + (hashUint(villageSeed, missionKey, 2412) % 7)
+        + (regionType === "Forest" ? 4 : 0),
+    ),
+    sheds: 1 + (hashUint(villageSeed, missionKey, 2413) % 2),
+    carts: 1 + (hashUint(villageSeed, missionKey, 2414) % 2),
+    fences: 8 + (hashUint(villageSeed, missionKey, 2415) % 7),
+    waterPots: regionType === "Riverside" ? 6 : 3,
+    boats: regionType === "Riverside" ? 2 : 0,
+    grainStacks: regionType === "Farming" ? 6 : 2,
+    hayStacks: regionType === "Farming" ? 5 : 2,
+  };
+  target.difficulty = difficulty;
+  return target;
+}
+
 function smoothstep(value) {
   return value * value * (3 - 2 * value);
 }
@@ -239,7 +534,12 @@ function setTransform(scratch, x, y, z, rotationY, scaleX, scaleY, scaleZ) {
 }
 
 function themeIndexFor(seed, chunkIndex) {
-  return hashUint(seed, chunkIndex, 91) % THEME_DEFINITIONS.length;
+  const regionType = regionTypeAtDistance(
+    seed,
+    chunkIndex * CHUNK_LENGTH + CHUNK_LENGTH * 0.5,
+  );
+  const themes = REGION_DEFINITIONS[regionType].themes;
+  return themes[hashUint(seed, chunkIndex, 91) % themes.length];
 }
 
 function edgeSurfaceTypeFor(themeIndex) {
@@ -535,6 +835,11 @@ function createChunk(slotIndex, obstaclePool) {
     village: "None",
     landmark: "None",
     event: "None",
+    regionId: "None",
+    regionType: "Farming",
+    regionClimate: "temperate",
+    regionStartRouteDistance: 0,
+    regionEndRouteDistance: 0,
     lodLevel: 2,
     roadWidth: 15,
     roadCenter: 0,
@@ -560,6 +865,7 @@ export class RoadGenerator {
     this.hazardRouteSample = {};
     this.eventRouteSample = {};
     this.previousEventRouteSample = {};
+    this.regionSample = {};
   }
 
   configure(chunk, chunkIndex, difficulty) {
@@ -692,6 +998,9 @@ export class RoadGenerator {
     target.distanceFromCenter = distanceFromCenter;
     target.isOnRoad = distanceFromCenter <= width * 0.5;
     target.theme = THEME_DEFINITIONS[themeIndex].name;
+    generateRegionDescriptor(this.seed, worldZ, this.regionSample);
+    target.regionId = this.regionSample.id;
+    target.regionType = this.regionSample.type;
     target.layout = ROAD_LAYOUTS[layoutIndex];
     target.surfaceType = surfaceTypeAt(
       themeIndex,
@@ -729,6 +1038,13 @@ export class RoadGenerator {
     }
     target.localDistance = localDistance;
     target.routeDistance = routeDistance + localDistance;
+    generateRegionDescriptor(
+      this.seed,
+      target.routeDistance,
+      this.regionSample,
+    );
+    target.regionId = this.regionSample.id;
+    target.regionType = this.regionSample.type;
     target.roadCenterX = target.centerX;
     target.roadHeight = target.height;
     return target;
@@ -871,6 +1187,9 @@ export class RoadGenerator {
     target.theme = THEME_DEFINITIONS[
       themeIndexFor(this.seed, chunkIndex)
     ].name;
+    generateRegionDescriptor(this.seed, routeDistance, this.regionSample);
+    target.regionId = this.regionSample.id;
+    target.regionType = this.regionSample.type;
     target.layout = ROAD_LAYOUTS[layoutIndex];
     return target;
   }
@@ -964,7 +1283,19 @@ export class RoadGenerator {
           719,
         );
         let type;
-        if (
+        if (sample.regionType === "Forest") {
+          type = typeHash < 0.66
+            ? HAZARD_FALLEN_BRANCH
+            : typeHash < 0.9 ? HAZARD_WOODEN_LOG : HAZARD_ROCK;
+        } else if (sample.regionType === "Rocky Area") {
+          type = typeHash < 0.72 ? HAZARD_ROCK : HAZARD_POTHOLE;
+        } else if (sample.regionType === "Farming") {
+          type = typeHash < 0.64
+            ? HAZARD_HAY_BUNDLE
+            : HAZARD_BROKEN_CART_WHEEL;
+        } else if (sample.regionType === "Riverside") {
+          type = typeHash < 0.72 ? HAZARD_POTHOLE : HAZARD_ROCK;
+        } else if (
           sample.layout === "Slight Uphill"
           || sample.layout === "Slight Downhill"
           || sample.layout === "Uneven Road"
@@ -1021,6 +1352,17 @@ export class RoadGenerator {
         descriptor.difficulty = level;
         descriptor.chunkIndex = sample.chunkIndex;
         descriptor.theme = sample.theme;
+        descriptor.regionId = sample.regionId;
+        descriptor.regionType = sample.regionType;
+        descriptor.regionVariant = sample.regionType === "Forest"
+          ? "fallen-wood"
+          : sample.regionType === "Rocky Area"
+            ? "stone"
+            : sample.regionType === "Farming"
+              ? "hay"
+              : sample.regionType === "Riverside"
+                ? "muddy-patch"
+                : "dry-road";
         descriptor.active = true;
         hazardCount += 1;
       }
@@ -1092,7 +1434,23 @@ export class RoadGenerator {
         823,
       );
       let type;
-      if (
+      let activity;
+      if (sample.regionType === "Forest") {
+        type = typeHash < 0.7 ? EVENT_ROAD_REPAIR : EVENT_BROKEN_BULLOCK_CART;
+        activity = "Woodcutters";
+      } else if (sample.regionType === "Riverside") {
+        type = typeHash < 0.7 ? EVENT_WATER_PUDDLE : EVENT_VILLAGE_CROWD;
+        activity = "Fishermen";
+      } else if (sample.regionType === "Farming") {
+        type = typeHash < 0.55 ? EVENT_VILLAGE_CROWD : EVENT_MARKET_SPILL;
+        activity = "Harvest Activity";
+      } else if (sample.regionType === "Rocky Area") {
+        type = typeHash < 0.6 ? EVENT_ROAD_REPAIR : EVENT_BROKEN_BULLOCK_CART;
+        activity = "Stone Workers";
+      } else if (sample.regionType === "Dry Plains") {
+        type = typeHash < 0.55 ? EVENT_CATTLE_CROSSING : EVENT_BROKEN_BULLOCK_CART;
+        activity = "Herders";
+      } else if (
         sample.theme === "Village Outskirts"
         || sample.theme === "Village Centre"
       ) {
@@ -1195,6 +1553,9 @@ export class RoadGenerator {
         descriptor.difficulty = level;
         descriptor.chunkIndex = sample.chunkIndex;
         descriptor.theme = sample.theme;
+        descriptor.regionId = sample.regionId;
+        descriptor.regionType = sample.regionType;
+        descriptor.activity = activity || "Roadside Activity";
         descriptor.active = true;
         eventCount += 1;
       }
@@ -1366,8 +1727,11 @@ export class EnvironmentGenerator {
     prepareDynamicGeometry(chunk.ground);
   }
 
-  configureTrees(chunk, chunkIndex, theme) {
-    const count = theme.trees;
+  configureTrees(chunk, chunkIndex, theme, regionDefinition) {
+    const count = Math.min(
+      MAX_TREES,
+      Math.max(1, Math.round(theme.trees * regionDefinition.treeFactor)),
+    );
     for (let index = 0; index < count; index += 1) {
       const side = index % 2 ? 1 : -1;
       const x =
@@ -1403,8 +1767,11 @@ export class EnvironmentGenerator {
     finalizeInstances(chunk.treeCrowns, count);
   }
 
-  configureCrops(chunk, chunkIndex, themeIndex, theme) {
-    const count = theme.crops;
+  configureCrops(chunk, chunkIndex, themeIndex, theme, regionDefinition) {
+    const count = Math.min(
+      MAX_CROPS,
+      Math.max(0, Math.round(theme.crops * regionDefinition.cropFactor)),
+    );
     for (let index = 0; index < count; index += 1) {
       const side = index % 2 ? 1 : -1;
       const lane = Math.floor(index / 2) % 9;
@@ -1425,13 +1792,35 @@ export class EnvironmentGenerator {
     finalizeInstances(chunk.crops, count);
   }
 
-  configureRoadside(chunk, chunkIndex, difficulty) {
-    const grassCount = 48 + (hashUint(this.seed, chunkIndex, 620) % 25);
-    const bushCount = 12 + (hashUint(this.seed, chunkIndex, 621) % 12);
-    const rockCount = 8 + (hashUint(this.seed, chunkIndex, 622) % 10);
-    const propCount = 8 + (hashUint(this.seed, chunkIndex, 623) % 14);
-    const potCount = 2 + (hashUint(this.seed, chunkIndex, 624) % 5);
-    const woodPileCount = 2 + (hashUint(this.seed, chunkIndex, 625) % 5);
+  configureRoadside(chunk, chunkIndex, difficulty, regionType, regionDefinition) {
+    const grassFactor = regionType === "Dry Plains" ? 0.42 : regionType === "Rocky Area" ? 0.55 : 1;
+    const grassCount = Math.min(
+      MAX_GRASS,
+      Math.round((48 + (hashUint(this.seed, chunkIndex, 620) % 25)) * grassFactor),
+    );
+    const bushCount = Math.min(
+      MAX_BUSHES,
+      Math.round((12 + (hashUint(this.seed, chunkIndex, 621) % 12)) * regionDefinition.bushFactor),
+    );
+    const rockCount = Math.min(
+      MAX_ROCKS,
+      Math.round((8 + (hashUint(this.seed, chunkIndex, 622) % 10)) * regionDefinition.rockFactor),
+    );
+    const propCount = Math.min(
+      MAX_ROADSIDE_PROPS,
+      8 + (hashUint(this.seed, chunkIndex, 623) % 14)
+        + (regionType === "Farming" ? 3 : 0),
+    );
+    const potCount = Math.min(
+      MAX_POTS,
+      2 + (hashUint(this.seed, chunkIndex, 624) % 5)
+        + (regionType === "Riverside" ? 2 : 0),
+    );
+    const woodPileCount = Math.min(
+      MAX_WOOD_PILES,
+      2 + (hashUint(this.seed, chunkIndex, 625) % 5)
+        + (regionType === "Forest" ? 2 : 0),
+    );
     const signCount = 1 + (hashUint(this.seed, chunkIndex, 626) % 3);
     const startZ = chunkIndex * CHUNK_LENGTH;
 
@@ -1454,9 +1843,14 @@ export class EnvironmentGenerator {
     for (let index = 0; index < rockCount; index += 1) {
       const side = index % 2 ? 1 : -1;
       const safeMargin = 10.5 - Math.min(1.5, difficulty * 0.12);
-      const x = side * (safeMargin + hash01(this.seed, chunkIndex, 1120 + index) * 16);
+      const rockyCliff = regionType === "Rocky Area" && index < 5;
+      const x = rockyCliff
+        ? side * (24 + hash01(this.seed, chunkIndex, 1120 + index) * 12)
+        : side * (safeMargin + hash01(this.seed, chunkIndex, 1120 + index) * 16);
       const z = startZ + hash01(this.seed, chunkIndex, 1180 + index) * CHUNK_LENGTH;
-      const scale = 0.5 + hash01(this.seed, chunkIndex, 1240 + index) * 0.9;
+      const scale = (
+        0.5 + hash01(this.seed, chunkIndex, 1240 + index) * 0.9
+      ) * (rockyCliff ? 2.7 : 1);
       setTransform(
         this.scratch,
         x,
@@ -1509,6 +1903,11 @@ export class EnvironmentGenerator {
     chunk.fullPotCount = potCount;
     chunk.fullWoodPileCount = woodPileCount;
     chunk.fullSignCount = signCount;
+    chunk.roadsideProps.material = regionType === "Farming"
+      ? materials.hay
+      : regionType === "Riverside"
+        ? materials.clay
+        : regionType === "Rocky Area" ? materials.rock : materials.trunk;
     finalizeInstances(chunk.grass, grassCount);
     finalizeInstances(chunk.bushes, bushCount);
     finalizeInstances(chunk.rocks, rockCount);
@@ -1518,22 +1917,23 @@ export class EnvironmentGenerator {
     finalizeInstances(chunk.signs, signCount);
   }
 
-  configureWater(chunk, chunkIndex, themeIndex) {
+  configureWater(chunk, chunkIndex, themeIndex, regionType) {
     const isPond = themeIndex === 6;
     const isCanal = themeIndex === 7;
-    chunk.water.visible = isPond || isCanal;
+    const isRiverside = regionType === "Riverside";
+    chunk.water.visible = isPond || isCanal || isRiverside;
     if (!chunk.water.visible) return;
     const side = hash01(this.seed, chunkIndex, 1510) > 0.5 ? 1 : -1;
-    if (isPond) {
+    if (isPond && !isRiverside) {
       chunk.water.position.set(side * 34, 0.055, chunkIndex * CHUNK_LENGTH + 42);
       chunk.water.scale.set(24, 15, 1);
     } else {
-      chunk.water.position.set(side * 23, 0.055, chunkIndex * CHUNK_LENGTH + 40);
-      chunk.water.scale.set(5, CHUNK_LENGTH + 2, 1);
+      chunk.water.position.set(side * 25, 0.055, chunkIndex * CHUNK_LENGTH + 40);
+      chunk.water.scale.set(isRiverside ? 11 : 5, CHUNK_LENGTH + 2, 1);
     }
   }
 
-  configureWorldEvent(chunk, chunkIndex, difficulty) {
+  configureWorldEvent(chunk, chunkIndex, difficulty, regionType) {
     const cadence = Math.max(9, 14 - Math.floor(difficulty * 0.55));
     const eventSlot = hashUint(this.seed, 0, 1601) % cadence;
     const hasEvent = ((chunkIndex % cadence) + cadence) % cadence === eventSlot;
@@ -1565,14 +1965,21 @@ export class EnvironmentGenerator {
       setTransform(this.scratch, x, 0.62 * scale, z, 0, scale, scale, scale);
       chunk.eventPeople.setMatrixAt(index, this.scratch.matrix);
     }
-    chunk.event = WORLD_EVENTS[normalizedEventIndex];
+    chunk.event = regionType === "Forest"
+      ? "Woodcutters"
+      : regionType === "Riverside"
+        ? "Fishermen"
+        : regionType === "Farming"
+          ? "Farmers Harvesting"
+          : WORLD_EVENTS[normalizedEventIndex];
     chunk.fullEventCount = count;
     finalizeInstances(chunk.eventPeople, count);
   }
 
-  configure(chunk, chunkIndex, difficulty) {
+  configure(chunk, chunkIndex, difficulty, region) {
     const themeIndex = themeIndexFor(this.seed, chunkIndex);
     const theme = THEME_DEFINITIONS[themeIndex];
+    const regionDefinition = REGION_DEFINITIONS[region.type];
     for (let index = 0; index < OBSTACLES_PER_CHUNK; index += 1) {
       const obstacle = this.obstaclePool[chunk.obstacleStart + index];
       obstacle.x = 10000;
@@ -1580,11 +1987,17 @@ export class EnvironmentGenerator {
       obstacle.radius = 0;
     }
     this.fillGround(chunk, chunkIndex);
-    this.configureTrees(chunk, chunkIndex, theme);
-    this.configureCrops(chunk, chunkIndex, themeIndex, theme);
-    this.configureRoadside(chunk, chunkIndex, difficulty);
-    this.configureWater(chunk, chunkIndex, themeIndex);
-    this.configureWorldEvent(chunk, chunkIndex, difficulty);
+    this.configureTrees(chunk, chunkIndex, theme, regionDefinition);
+    this.configureCrops(chunk, chunkIndex, themeIndex, theme, regionDefinition);
+    this.configureRoadside(
+      chunk,
+      chunkIndex,
+      difficulty,
+      region.type,
+      regionDefinition,
+    );
+    this.configureWater(chunk, chunkIndex, themeIndex, region.type);
+    this.configureWorldEvent(chunk, chunkIndex, difficulty, region.type);
     chunk.themeIndex = themeIndex;
     chunk.theme = theme.name;
   }
@@ -1596,7 +2009,7 @@ export class VillageGenerator {
     this.scratch = new THREE.Object3D();
   }
 
-  configureVillageDetails(chunk, chunkIndex, houseCount) {
+  configureVillageDetails(chunk, chunkIndex, houseCount, regionType) {
     hideMeshPool(chunk.villageMeshPool);
     if (houseCount <= 0) return 0;
     const baseZ = chunkIndex * CHUNK_LENGTH;
@@ -1619,6 +2032,67 @@ export class VillageGenerator {
       used += 1;
     };
     const side = combinations % 2 ? 1 : -1;
+    if (regionType === "Forest") {
+      for (let index = 0; index < 3; index += 1) {
+        addFeature(
+          geometries.cylinder,
+          materials.trunk,
+          side * (21 + index * 3),
+          1.8,
+          baseZ + 16 + index * 14,
+          0.7,
+          3.6,
+          0.7,
+        );
+        addFeature(
+          geometries.sphere,
+          materials.leaf,
+          side * (21 + index * 3),
+          4.6,
+          baseZ + 16 + index * 14,
+          2.5,
+          2.1,
+          2.5,
+        );
+      }
+    } else if (regionType === "Riverside") {
+      addFeature(
+        geometries.box,
+        materials.trunk,
+        side * 25,
+        0.45,
+        baseZ + 28,
+        4.8,
+        0.45,
+        1.5,
+        0.2,
+      );
+      for (let index = 0; index < 4; index += 1) {
+        addFeature(
+          geometries.sphere,
+          materials.clay,
+          -side * (17 + (index % 2) * 1.2),
+          0.5,
+          baseZ + 35 + Math.floor(index / 2) * 1.2,
+          0.65,
+          0.85,
+          0.65,
+        );
+      }
+    } else if (regionType === "Farming") {
+      for (let index = 0; index < 4; index += 1) {
+        addFeature(
+          index % 2 ? geometries.box : geometries.cone,
+          materials.hay,
+          side * (18 + (index % 2) * 3),
+          index % 2 ? 0.65 : 1.2,
+          baseZ + 18 + index * 10,
+          index % 2 ? 1.8 : 1.2,
+          index % 2 ? 1.3 : 2.4,
+          index % 2 ? 1.2 : 1.2,
+        );
+      }
+    }
     if (combinations & 1) {
       addFeature(geometries.cylinder, materials.rock, side * 18, 0.7, baseZ + 18, 1.5, 0.8, 1.5);
       addFeature(geometries.torus, materials.rock, side * 18, 1.35, baseZ + 18, 1.5, 1.5, 1.5);
@@ -1655,7 +2129,7 @@ export class VillageGenerator {
     return used;
   }
 
-  configure(chunk, chunkIndex) {
+  configure(chunk, chunkIndex, region) {
     const isVillage =
       chunk.themeIndex === 8
       || chunk.themeIndex === 9
@@ -1701,10 +2175,10 @@ export class VillageGenerator {
     chunk.fullHouseCount = houseCount;
     finalizeInstances(chunk.houses, houseCount);
     finalizeInstances(chunk.roofs, houseCount);
-    this.configureVillageDetails(chunk, chunkIndex, houseCount);
+    this.configureVillageDetails(chunk, chunkIndex, houseCount, region.type);
     chunk.village =
       `${VILLAGE_NAMES[hashUint(this.seed, chunkIndex, 1862) % VILLAGE_NAMES.length]} · ${
-        chunk.themeIndex === 9 ? "Centre" : "Outskirts"
+        region.type
       }`;
   }
 }
@@ -1714,11 +2188,16 @@ export class LandmarkManager {
     this.seed = seed;
   }
 
-  configure(chunk, chunkIndex) {
+  configure(chunk, chunkIndex, region) {
     hideMeshPool(chunk.landmarkMeshPool);
     const cadence = 8;
     const landmarkSlot = hashUint(this.seed, 0, 1900) % cadence;
-    const hasLandmark = ((chunkIndex % cadence) + cadence) % cadence === landmarkSlot;
+    const riverBridge = (
+      region.type === "Riverside"
+      && ((chunkIndex % 6) + 6) % 6 === (hashUint(this.seed, 0, 1899) % 6)
+    );
+    const hasLandmark = riverBridge
+      || ((chunkIndex % cadence) + cadence) % cadence === landmarkSlot;
     if (!hasLandmark) {
       chunk.landmark = "None";
       return;
@@ -1726,7 +2205,9 @@ export class LandmarkManager {
     const sequence = Math.floor(chunkIndex / cadence);
     const rawType =
       (sequence + (hashUint(this.seed, 0, 1901) % LANDMARKS.length)) % LANDMARKS.length;
-    const type = rawType < 0 ? rawType + LANDMARKS.length : rawType;
+    const type = riverBridge
+      ? 3
+      : rawType < 0 ? rawType + LANDMARKS.length : rawType;
     const pool = chunk.landmarkMeshPool;
     const z = chunkIndex * CHUNK_LENGTH + 48;
     const side = hash01(this.seed, chunkIndex, 1902) > 0.5 ? 1 : -1;
@@ -1828,6 +2309,9 @@ export class ChunkManager {
     this.loadedChunks = 0;
     this.currentDifficulty = 1;
     this.totalObjects = 0;
+    this.regionWorldPosition = { x: 0, z: 0 };
+    this.regionRouteSample = {};
+    this.regionDescriptor = {};
     for (let index = 0; index < this.poolSize; index += 1) {
       const chunk = createChunk(index, obstacles);
       chunk.group.visible = false;
@@ -1862,9 +2346,42 @@ export class ChunkManager {
     chunk.group.visible = true;
     chunk.lodLevel = -1;
     this.roadGenerator.configure(chunk, chunkIndex, difficulty);
-    this.environmentGenerator.configure(chunk, chunkIndex, difficulty);
-    this.villageGenerator.configure(chunk, chunkIndex);
-    this.landmarkManager.configure(chunk, chunkIndex);
+    this.regionWorldPosition.z = (
+      chunkIndex * CHUNK_LENGTH + CHUNK_LENGTH * 0.5
+    );
+    this.roadGenerator.getRoutePosition(
+      this.regionWorldPosition,
+      difficulty,
+      this.regionRouteSample,
+    );
+    generateRegionDescriptor(
+      this.seed,
+      this.regionRouteSample.routeDistance,
+      this.regionDescriptor,
+    );
+    chunk.regionId = this.regionDescriptor.id;
+    chunk.regionType = this.regionDescriptor.type;
+    chunk.regionClimate = this.regionDescriptor.climate;
+    chunk.regionStartRouteDistance =
+      this.regionDescriptor.startRouteDistance;
+    chunk.regionEndRouteDistance =
+      this.regionDescriptor.endRouteDistance;
+    this.environmentGenerator.configure(
+      chunk,
+      chunkIndex,
+      difficulty,
+      this.regionDescriptor,
+    );
+    this.villageGenerator.configure(
+      chunk,
+      chunkIndex,
+      this.regionDescriptor,
+    );
+    this.landmarkManager.configure(
+      chunk,
+      chunkIndex,
+      this.regionDescriptor,
+    );
     chunk.objectCount =
       chunk.fullTreeCount * 2
       + chunk.fullCropCount
@@ -1985,6 +2502,10 @@ export class WorldGenerator {
       poolSize,
     });
     this.regions = new Map();
+    this.playerRouteSample = {};
+    this.currentRegion = {};
+    this.villageRegion = {};
+    this.regionTint = new THREE.Color(0xa4cde3);
     this.previousPlayerZ = Number.NaN;
     this.fps = 60;
     this.drawCalls = 0;
@@ -2001,6 +2522,9 @@ export class WorldGenerator {
       fps: 60,
       roadLayout: "Straight",
       worldEvent: "None",
+      regionId: "None",
+      regionType: "Farming",
+      nextRegionDistance: 0,
     };
   }
 
@@ -2018,6 +2542,10 @@ export class WorldGenerator {
       difficulty,
       target,
     );
+  }
+
+  getRegionAtRouteDistance(routeDistance, target = {}) {
+    return generateRegionDescriptor(this.seed, routeDistance, target);
   }
 
   sampleRouteDistance(routeDistance, difficulty = 1, target = {}) {
@@ -2084,6 +2612,29 @@ export class WorldGenerator {
     );
   }
 
+  generateVillage(
+    routeDistance,
+    difficulty,
+    missionKey,
+    preferredName,
+    targetVillage,
+  ) {
+    generateRegionDescriptor(
+      this.seed,
+      routeDistance,
+      this.villageRegion,
+    );
+    return generateVillageDescriptor(
+      this.seed,
+      routeDistance,
+      difficulty,
+      missionKey,
+      preferredName,
+      targetVillage,
+      this.villageRegion,
+    );
+  }
+
   reseed() {
     this.seed = hashUint(
       this.seed ^ (Date.now() >>> 0),
@@ -2118,6 +2669,25 @@ export class WorldGenerator {
     }
     this.previousPlayerZ = playerPosition.z;
     this.chunkManager.update(playerPosition, difficulty);
+    this.roadGenerator.getRoutePosition(
+      playerPosition,
+      difficulty,
+      this.playerRouteSample,
+    );
+    generateRegionDescriptor(
+      this.seed,
+      this.playerRouteSample.routeDistance,
+      this.currentRegion,
+    );
+    const regionDefinition = REGION_DEFINITIONS[this.currentRegion.type];
+    this.regionTint.setHex(regionDefinition.tint);
+    const tintBlend = 1 - Math.exp(-0.35 * delta);
+    if (this.scene.background && this.scene.background.isColor) {
+      this.scene.background.lerp(this.regionTint, tintBlend);
+    }
+    if (this.scene.fog) {
+      this.scene.fog.color.lerp(this.regionTint, tintBlend);
+    }
     this.fps = THREE.MathUtils.lerp(
       this.fps,
       1 / Math.max(delta, 0.001),
@@ -2130,6 +2700,13 @@ export class WorldGenerator {
     this.debug.objectsSpawned = this.chunkManager.totalObjects;
     this.debug.drawCalls = drawCalls;
     this.debug.fps = this.fps;
+    this.debug.regionId = this.currentRegion.id;
+    this.debug.regionType = this.currentRegion.type;
+    this.debug.nextRegionDistance = Math.max(
+      0,
+      this.currentRegion.endRouteDistance
+        - this.playerRouteSample.routeDistance,
+    );
     if (current) {
       this.debug.currentTheme = current.theme;
       this.debug.currentVillage = current.village;

@@ -40,7 +40,7 @@ const ROAD_EXCESS_RETURN_RESPONSE = 1.2;
 const ROAD_OFF_ROAD_RESISTANCE_MIN = 0.025;
 const ROAD_OFF_ROAD_RESISTANCE_MAX = 0.08;
 const DESTINATION_ROUTE_TOLERANCE = 5;
-const DESTINATION_LATERAL_TOLERANCE = 7.5;
+const DESTINATION_LATERAL_TOLERANCE = 3.4;
 const ROUTE_BRANCH_LENGTH = 52;
 const ROUTE_BRANCH_OFFSET = 12;
 const ROUTE_CHOICE_DISTANCE = 6;
@@ -180,6 +180,7 @@ const speedLabel = document.querySelector("#speed");
 const speedModeLabel = document.querySelector("#speed-mode");
 const checkpointMessage = document.querySelector("#checkpoint-message");
 const askDirectionButton = document.querySelector("#ask-direction-button");
+const deliveryInteractionButton = document.querySelector("#delivery-interaction-button");
 const directionDialogueElement = document.querySelector("#direction-dialogue");
 const directionDriverLine = document.querySelector("#direction-driver-line");
 const directionVillagerLine = document.querySelector("#direction-villager-line");
@@ -227,6 +228,11 @@ const movementDebug = {
   lodLevel: document.querySelector("#procedural-debug-lod"),
   drawCalls: document.querySelector("#procedural-debug-draw-calls"),
   fps: document.querySelector("#procedural-debug-fps"),
+  activeVillageName: document.querySelector("#village-debug-name"),
+  activeVillageVillagers: document.querySelector("#village-debug-villagers"),
+  activeVillageAnimals: document.querySelector("#village-debug-animals"),
+  deliveryAvailable: document.querySelector("#village-debug-delivery-available"),
+  deliveryCompleted: document.querySelector("#village-debug-delivery-completed"),
 };
 
 const scene = new THREE.Scene();
@@ -253,6 +259,7 @@ const {
   generateEventDescriptors,
   generateHazardDescriptors,
   generateRouteNetwork,
+  generateVillage,
   getRoutePosition,
   sampleRouteDistance,
   sampleRoad,
@@ -385,6 +392,41 @@ const missionMarkerState = {
   nextCheckpointWorldPosition: { x: 0, y: 0, z: 0 },
   nextCheckpointTriggered: false,
   checkpoints: checkpointMarkerStates,
+};
+const villageDescriptor = {
+  id: "None",
+  name: MISSIONS[0].destinationVillageName,
+  routeDistance: 0,
+  theme: "None",
+  size: 0,
+  population: 0,
+  populationBreakdown: {},
+  entrance: { routeDistance: 0, label: "" },
+  square: { routeDistance: 0, radius: 0 },
+  deliveryPoint: {
+    id: "None",
+    type: "None",
+    routeDistance: 0,
+    lateralOffset: 0,
+  },
+  landmark: "None",
+  activityZones: [],
+  decorationCounts: {},
+  seed: 0,
+};
+const villageState = {
+  villageName: villageDescriptor.name,
+  villageId: villageDescriptor.id,
+  villagePopulation: 0,
+  deliveryPoint: villageDescriptor.deliveryPoint,
+  distanceToVillage: 0,
+  enteringShown: false,
+  reachedShown: false,
+  activeVillageName: "None",
+  activeVillagerCount: 0,
+  activeAnimalCount: 0,
+  deliveryInteractionAvailable: false,
+  deliveryCompleted: false,
 };
 const routeState = {
   currentRouteDistance: 0,
@@ -818,19 +860,26 @@ function updateNextCheckpointRouteDistance() {
 
 function rebuildMissionRouteMarkers() {
   sampleRouteDistance(
-    routeState.targetRouteDistance,
+    villageDescriptor.deliveryPoint.routeDistance,
     state.mission.level,
     missionRouteSample,
   );
   roadGameplay.placeDestination(
     missionRouteSample,
     navigationState.destinationVillageName,
+    villageDescriptor.deliveryPoint.lateralOffset,
   );
   missionMarkerState.destinationRouteDistance =
-    routeState.targetRouteDistance;
-  missionMarkerState.destinationWorldPosition.x = missionRouteSample.centerX;
+    villageDescriptor.deliveryPoint.routeDistance;
+  missionMarkerState.destinationWorldPosition.x = (
+    missionRouteSample.centerX
+    + missionRouteSample.normalX * villageDescriptor.deliveryPoint.lateralOffset
+  );
   missionMarkerState.destinationWorldPosition.y = missionRouteSample.centerY;
-  missionMarkerState.destinationWorldPosition.z = missionRouteSample.centerZ;
+  missionMarkerState.destinationWorldPosition.z = (
+    missionRouteSample.centerZ
+    + missionRouteSample.normalZ * villageDescriptor.deliveryPoint.lateralOffset
+  );
   missionMarkerState.destinationNormalX = missionRouteSample.normalX;
   missionMarkerState.destinationNormalZ = missionRouteSample.normalZ;
   missionMarkerState.distanceToDestinationByRoute =
@@ -856,6 +905,37 @@ function rebuildMissionRouteMarkers() {
     roadGameplay.setCheckpointTriggered(index, false);
   }
   updateNextCheckpointRouteDistance();
+}
+
+function rebuildVillage() {
+  generateVillage(
+    routeState.targetRouteDistance,
+    state.mission.level,
+    state.missionIndex,
+    navigationState.destinationVillageName,
+    villageDescriptor,
+  );
+  roadGameplay.configureVillage(
+    villageDescriptor,
+    sampleRouteDistance,
+    state.mission.level,
+  );
+  villageState.villageName = villageDescriptor.name;
+  villageState.villageId = villageDescriptor.id;
+  villageState.villagePopulation = villageDescriptor.population;
+  villageState.deliveryPoint = villageDescriptor.deliveryPoint;
+  villageState.distanceToVillage = Math.max(
+    0,
+    villageDescriptor.entrance.routeDistance - routeState.currentRouteDistance,
+  );
+  villageState.enteringShown = false;
+  villageState.reachedShown = false;
+  villageState.activeVillageName = "None";
+  villageState.activeVillagerCount = 0;
+  villageState.activeAnimalCount = 0;
+  villageState.deliveryInteractionAvailable = false;
+  villageState.deliveryCompleted = false;
+  deliveryInteractionButton.classList.add("hidden");
 }
 
 function updateHazardState() {
@@ -1026,6 +1106,7 @@ function initializeMissionRoute() {
   routeState.localDistance = currentRoadSample.localDistance;
   state.progress = 0;
   rebuildRouteNetwork();
+  rebuildVillage();
   rebuildMissionRouteMarkers();
   rebuildProceduralHazards();
   rebuildProceduralEvents();
@@ -1178,6 +1259,32 @@ function showCheckpoint(remaining) {
   }, 2100);
 }
 
+function showVillageToast(message) {
+  window.clearTimeout(checkpointTimer);
+  checkpointMessage.textContent = message;
+  checkpointMessage.classList.remove("hidden");
+  checkpointTimer = window.setTimeout(() => {
+    checkpointMessage.classList.add("hidden");
+  }, 2400);
+}
+
+function confirmDelivery() {
+  if (
+    state.journeyStatus !== "playing"
+    || !villageState.deliveryInteractionAvailable
+    || villageState.deliveryCompleted
+  ) {
+    return;
+  }
+  villageState.deliveryCompleted = true;
+  villageState.deliveryInteractionAvailable = false;
+  villageState.reachedShown = true;
+  routeState.completionEligible = true;
+  deliveryInteractionButton.classList.add("hidden");
+  showVillageToast("Goods Delivered Successfully");
+  beginJourneyFinish();
+}
+
 function beginJourneyFinish() {
   if (state.journeyStatus !== "playing") return;
   state.progress = routeState.requiredRouteDistance;
@@ -1208,6 +1315,7 @@ function completeJourney() {
   controls.setEnabled(false);
   touchControls.classList.add("hidden");
   checkpointMessage.classList.add("hidden");
+  deliveryInteractionButton.classList.add("hidden");
   state.nextMissionIndex = (state.missionIndex + 1) % MISSIONS.length;
   showMissionResult(
     "Journey complete",
@@ -1226,6 +1334,7 @@ function failCargoMission() {
   controls.resetAll();
   controls.setEnabled(false);
   touchControls.classList.add("hidden");
+  deliveryInteractionButton.classList.add("hidden");
   hint.classList.add("hidden");
   checkpointMessage.classList.add("hidden");
   audioManager.playCargoFailure();
@@ -1414,6 +1523,18 @@ function updateJourneyProgress() {
   );
   routeState.chunkIndex = currentRoadSample.chunkIndex;
   routeState.localDistance = currentRoadSample.localDistance;
+  villageState.distanceToVillage = Math.max(
+    0,
+    villageDescriptor.entrance.routeDistance - routeState.currentRouteDistance,
+  );
+  if (
+    !villageState.enteringShown
+    && !navigationState.isOnWrongRoute
+    && routeState.currentRouteDistance >= villageDescriptor.entrance.routeDistance
+  ) {
+    villageState.enteringShown = true;
+    showVillageToast(`Welcome to ${villageDescriptor.name}`);
+  }
   updateHazardState();
   updateEventState();
   state.progress = Math.min(
@@ -1458,7 +1579,7 @@ function updateJourneyProgress() {
     routeDistanceFromDestination <= DESTINATION_ROUTE_TOLERANCE
     && destinationLateralDistance <= DESTINATION_LATERAL_TOLERANCE
   );
-  routeState.completionEligible = (
+  const deliveryRouteEligible = (
     routeState.currentRouteDistance >= routeState.targetRouteDistance
     && !navigationState.isOnWrongRoute
     && (
@@ -1471,7 +1592,16 @@ function updateJourneyProgress() {
     )
     && missionMarkerState.arrivalZoneActive
   );
-  if (routeState.completionEligible) beginJourneyFinish();
+  villageState.deliveryInteractionAvailable = (
+    deliveryRouteEligible && !villageState.deliveryCompleted
+  );
+  deliveryInteractionButton.classList.toggle(
+    "hidden",
+    !villageState.deliveryInteractionAvailable,
+  );
+  routeState.completionEligible = (
+    deliveryRouteEligible && villageState.deliveryCompleted
+  );
 }
 
 function updateMovement(delta) {
@@ -1854,6 +1984,16 @@ function updateMovementDebug(delta) {
     String(worldGenerator.debug.drawCalls);
   movementDebug.fps.textContent =
     worldGenerator.debug.fps.toFixed(0);
+  movementDebug.activeVillageName.textContent =
+    villageState.activeVillageName;
+  movementDebug.activeVillageVillagers.textContent =
+    String(villageState.activeVillagerCount);
+  movementDebug.activeVillageAnimals.textContent =
+    String(villageState.activeAnimalCount);
+  movementDebug.deliveryAvailable.textContent =
+    villageState.deliveryInteractionAvailable ? "YES" : "NO";
+  movementDebug.deliveryCompleted.textContent =
+    villageState.deliveryCompleted ? "YES" : "NO";
 }
 
 function updateHud() {
@@ -1992,6 +2132,10 @@ function updateHud() {
       proceduralEvents: eventState,
       navigation: navigationState,
       routeNetwork: missionRouteNetwork,
+      proceduralVillage: {
+        ...villageState,
+        descriptor: villageDescriptor,
+      },
       directionDialogue: directionDialogueState,
     });
   }
@@ -2017,6 +2161,13 @@ function animate() {
     elapsed: state.elapsed,
     delta,
   });
+  roadGameplay.updateVillage(cart.position, state.elapsed, delta);
+  villageState.activeVillageName =
+    roadGameplay.villageDebug.activeVillageName;
+  villageState.activeVillagerCount =
+    roadGameplay.villageDebug.activeVillagerCount;
+  villageState.activeAnimalCount =
+    roadGameplay.villageDebug.activeAnimalCount;
   updateCamera(delta);
   updateMovementDebug(delta);
   updateHud();
@@ -2117,8 +2268,14 @@ function replayGame() {
 playButton.addEventListener("click", startGame);
 replayButton.addEventListener("click", replayGame);
 askDirectionButton.addEventListener("click", askVillagerForDirection);
+deliveryInteractionButton.addEventListener("click", confirmDelivery);
 window.addEventListener("keydown", (event) => {
   if (event.code !== "KeyE" || event.repeat) return;
+  if (villageState.deliveryInteractionAvailable) {
+    event.preventDefault();
+    confirmDelivery();
+    return;
+  }
   if (!navigationState.canAsk) return;
   event.preventDefault();
   askVillagerForDirection();
@@ -2208,6 +2365,12 @@ window.__bailgadi = {
     proceduralEvents: import.meta.env.DEV ? eventState : undefined,
     navigation: import.meta.env.DEV ? navigationState : undefined,
     routeNetwork: import.meta.env.DEV ? missionRouteNetwork : undefined,
+    proceduralVillage: import.meta.env.DEV
+      ? {
+        ...villageState,
+        descriptor: villageDescriptor,
+      }
+      : undefined,
     directionDialogue: import.meta.env.DEV
       ? directionDialogueState
       : undefined,
@@ -2222,22 +2385,54 @@ const autoTest = import.meta.env.DEV
   : null;
 if (autoTest) {
   startGame();
-  const driveKey = autoTest === "reverse" ? "ArrowDown" : "ArrowUp";
-  window.dispatchEvent(new KeyboardEvent("keydown", { code: driveKey, bubbles: true }));
-  if (autoTest === "reverse") {
+  if (autoTest === "village" || autoTest === "delivery") {
     setTimeout(() => {
+      sampleRouteDistance(
+        villageDescriptor.deliveryPoint.routeDistance + 0.75,
+        state.mission.level,
+        missionRouteSample,
+      );
+      cart.position.set(
+        missionRouteSample.centerX
+          + missionRouteSample.normalX * villageDescriptor.deliveryPoint.lateralOffset,
+        missionRouteSample.centerY + CART_ROAD_CLEARANCE,
+        missionRouteSample.centerZ
+          + missionRouteSample.normalZ * villageDescriptor.deliveryPoint.lateralOffset,
+      );
+      state.heading = Math.atan2(
+        missionRouteSample.tangentX,
+        missionRouteSample.tangentZ,
+      );
+      cart.rotation.y = state.heading;
+      navigationState.currentRouteId = missionRouteNetwork.destinationRouteId;
+      navigationState.correctRouteId = missionRouteNetwork.destinationRouteId;
+      if (autoTest === "delivery") {
+        setTimeout(() => {
+          window.dispatchEvent(new KeyboardEvent("keydown", {
+            code: "KeyE",
+            bubbles: true,
+          }));
+        }, 180);
+      }
+    }, 120);
+  } else {
+    const driveKey = autoTest === "reverse" ? "ArrowDown" : "ArrowUp";
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: driveKey, bubbles: true }));
+    if (autoTest === "reverse") {
+      setTimeout(() => {
+        window.dispatchEvent(new KeyboardEvent("keyup", { code: driveKey, bubbles: true }));
+      }, 1600);
+    }
+    setTimeout(() => {
+      if (autoTest !== "reverse") {
+        window.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowLeft", bubbles: true }));
+      }
+    }, 550);
+    setTimeout(() => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { code: "ArrowLeft", bubbles: true }));
       window.dispatchEvent(new KeyboardEvent("keyup", { code: driveKey, bubbles: true }));
     }, 1600);
   }
-  setTimeout(() => {
-    if (autoTest !== "reverse") {
-      window.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowLeft", bubbles: true }));
-    }
-  }, 550);
-  setTimeout(() => {
-    window.dispatchEvent(new KeyboardEvent("keyup", { code: "ArrowLeft", bubbles: true }));
-    window.dispatchEvent(new KeyboardEvent("keyup", { code: driveKey, bubbles: true }));
-  }, 1600);
 }
 
 const voiceTest = import.meta.env.DEV

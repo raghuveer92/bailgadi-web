@@ -45,6 +45,10 @@ const DESTINATION_WOOD = material(0x714526);
 const DESTINATION_CLOTH = material(0xd7a83d);
 const DESTINATION_PLASTER = material(0xd9b271);
 const DESTINATION_LEAF = material(0x3f6b38);
+const VILLAGE_BLUE = material(0x74a5a1);
+const VILLAGE_ROOF = material(0xa65334);
+const VILLAGE_GROUND = material(0xb98b55);
+const VILLAGE_DARK = material(0x3b3027);
 
 function prepareMesh(mesh, castShadow = true) {
   mesh.castShadow = castShadow;
@@ -406,72 +410,424 @@ function createDirectionVillager() {
 
 function createDestinationMarker() {
   const marker = new THREE.Group();
-  marker.name = "VillageDestination";
-  [-1, 1].forEach((side) => {
-    const post = prepareMesh(new THREE.Mesh(
-      new THREE.CylinderGeometry(0.16, 0.2, 5.4, 7),
-      DESTINATION_WOOD,
-    ));
-    post.position.set(side * 8.4, 2.7, 0);
-    marker.add(post);
-  });
-  const beam = prepareMesh(new THREE.Mesh(
-    new THREE.BoxGeometry(17.2, 0.28, 0.3),
+  marker.name = "VillageDeliveryPoint";
+  const pad = prepareMesh(new THREE.Mesh(
+    new THREE.RingGeometry(1.7, 2.25, 24),
+    DESTINATION_CLOTH,
+  ), false);
+  pad.rotation.x = -Math.PI / 2;
+  pad.position.y = 0.07;
+  marker.add(pad);
+  const post = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.11, 0.15, 3.8, 7),
     DESTINATION_WOOD,
   ));
-  beam.position.y = 5.25;
-  marker.add(beam);
-
-  for (let x = -6; x <= 6; x += 2) {
-    const flag = prepareMesh(new THREE.Mesh(
-      new THREE.ConeGeometry(0.28, 0.65, 3),
-      DESTINATION_CLOTH,
-    ));
-    flag.rotation.z = Math.PI;
-    flag.position.set(x, 4.8, 0);
-    marker.add(flag);
-  }
-
-  const templeBase = prepareMesh(new THREE.Mesh(
-    new THREE.BoxGeometry(5.4, 4.8, 5.2),
-    DESTINATION_PLASTER,
-  ));
-  templeBase.position.set(-14, 2.4, 9);
-  marker.add(templeBase);
-  const templeTower = prepareMesh(new THREE.Mesh(
-    new THREE.ConeGeometry(2.5, 8.5, 8),
+  post.position.set(2.15, 1.9, 0);
+  marker.add(post);
+  const flag = prepareMesh(new THREE.Mesh(
+    new THREE.ConeGeometry(0.65, 1.45, 3),
     DESTINATION_CLOTH,
   ));
-  templeTower.position.set(-14, 8.95, 9);
-  marker.add(templeTower);
-  const templeFinial = prepareMesh(new THREE.Mesh(
-    new THREE.SphereGeometry(0.42, 7, 5),
-    DESTINATION_WOOD,
-  ));
-  templeFinial.position.set(-14, 13.25, 9);
-  marker.add(templeFinial);
-
-  const banyanTrunk = prepareMesh(new THREE.Mesh(
-    new THREE.CylinderGeometry(0.75, 1.15, 6.4, 8),
-    DESTINATION_WOOD,
-  ));
-  banyanTrunk.position.set(14.5, 3.2, 11);
-  marker.add(banyanTrunk);
-  [
-    [14.5, 7.2, 11, 3.7],
-    [11.9, 6.5, 11.2, 2.8],
-    [17.2, 6.6, 10.8, 2.9],
-    [14.4, 9.3, 10.8, 2.7],
-  ].forEach(([x, y, z, radius]) => {
-    const crown = prepareMesh(new THREE.Mesh(
-      new THREE.DodecahedronGeometry(radius, 0),
-      DESTINATION_LEAF,
-    ));
-    crown.position.set(x, y, z);
-    marker.add(crown);
-  });
+  flag.rotation.z = -Math.PI / 2;
+  flag.position.set(1.52, 3.25, 0);
+  marker.add(flag);
   marker.visible = false;
   return marker;
+}
+
+function seededVillageRandom(seed) {
+  let value = seed >>> 0;
+  return () => {
+    value = (Math.imul(value ^ (value >>> 15), 2246822519) + 3266489917) >>> 0;
+    value ^= value >>> 13;
+    return (value >>> 0) / 4294967295;
+  };
+}
+
+function createVillageHouse() {
+  const group = new THREE.Group();
+  const body = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(4.8, 3, 4.2),
+    DESTINATION_PLASTER,
+  ));
+  body.position.y = 1.5;
+  const roof = prepareMesh(new THREE.Mesh(
+    new THREE.ConeGeometry(3.55, 1.65, 4),
+    VILLAGE_ROOF,
+  ));
+  roof.position.y = 3.82;
+  roof.rotation.y = Math.PI / 4;
+  const door = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(0.9, 1.75, 0.12),
+    VILLAGE_DARK,
+  ));
+  door.position.set(0, 0.88, 2.16);
+  group.add(body, roof, door);
+  return { group, body, roof };
+}
+
+function createVillagePerson(index) {
+  const group = new THREE.Group();
+  const body = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.2, 0.3, 1.12, 6),
+    index % 3 === 0 ? DESTINATION_CLOTH : index % 3 === 1 ? EVENT_CLOTH : VILLAGE_BLUE,
+  ));
+  body.position.y = 0.65;
+  const head = prepareMesh(new THREE.Mesh(
+    new THREE.SphereGeometry(0.18, 7, 5),
+    EVENT_SKIN,
+  ));
+  head.position.y = 1.38;
+  const pot = prepareMesh(new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 8, 6),
+    EVENT_CLOTH,
+  ));
+  pot.scale.y = 1.2;
+  pot.position.y = 1.83;
+  pot.visible = index % 4 === 2;
+  const broom = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.025, 0.045, 1.45, 5),
+    HAY_TIE,
+  ));
+  broom.position.set(0.34, 0.55, 0);
+  broom.rotation.z = -0.38;
+  broom.visible = false;
+  group.add(body, head, pot, broom);
+  return {
+    group,
+    body,
+    head,
+    pot,
+    broom,
+    behavior: "standing",
+    phase: index * 0.73,
+    anchorX: 0,
+    anchorY: 0,
+    anchorZ: 0,
+    targetX: 0,
+    targetZ: 0,
+    baseRotation: 0,
+    baseScale: 1,
+  };
+}
+
+function createVillageAnimal(index) {
+  const group = new THREE.Group();
+  addPlaceholderCattle(group, 0, 0, 0);
+  if (index % 3 === 2) {
+    group.scale.set(1.12, 1, 1.08);
+    group.traverse((child) => {
+      if (child.isMesh && child.material === EVENT_CATTLE) child.material = VILLAGE_DARK;
+    });
+  }
+  return {
+    group,
+    behavior: index % 3 === 0 ? "grazing" : index % 3 === 1 ? "wandering" : "standing",
+    phase: index * 1.17,
+    anchorX: 0,
+    anchorY: 0,
+    anchorZ: 0,
+    radius: 0,
+    baseRotation: 0,
+  };
+}
+
+function createVillageTree() {
+  const group = new THREE.Group();
+  const trunk = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.28, 0.42, 3.4, 7),
+    DESTINATION_WOOD,
+  ));
+  trunk.position.y = 1.7;
+  const crown = prepareMesh(new THREE.Mesh(
+    new THREE.DodecahedronGeometry(1.45, 0),
+    DESTINATION_LEAF,
+  ));
+  crown.position.y = 4.25;
+  group.add(trunk, crown);
+  return group;
+}
+
+function createVillageEntrance() {
+  const group = new THREE.Group();
+  for (let side = -1; side <= 1; side += 2) {
+    const post = prepareMesh(new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.24, 4.6, 7),
+      DESTINATION_WOOD,
+    ));
+    post.position.set(side * 7.7, 2.3, 0);
+    group.add(post);
+  }
+  const beam = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(15.8, 0.42, 0.38),
+    DESTINATION_WOOD,
+  ));
+  beam.position.y = 4.35;
+  const signMaterial = new THREE.SpriteMaterial({ color: 0xffffff });
+  const sign = new THREE.Sprite(signMaterial);
+  sign.position.set(0, 5.3, 0);
+  sign.scale.set(10.5, 2.2, 1);
+  sign.center.set(0.5, 0.5);
+  group.add(beam, sign);
+  return { group, sign, texture: null };
+}
+
+const AMBIENT_PROP_TYPES = Object.freeze([
+  "charpai",
+  "clay-pots",
+  "hay-stack",
+  "handpump",
+  "bicycle",
+  "wooden-cart",
+  "grain-sacks",
+  "lantern",
+]);
+
+function createAmbientProp(type) {
+  const group = new THREE.Group();
+  if (type === "charpai") {
+    const bed = prepareMesh(new THREE.Mesh(
+      new THREE.BoxGeometry(2.4, 0.12, 1.15),
+      HAY,
+    ));
+    bed.position.y = 0.58;
+    group.add(bed);
+    for (let x = -1; x <= 1; x += 2) {
+      for (let z = -1; z <= 1; z += 2) {
+        const leg = prepareMesh(new THREE.Mesh(
+          new THREE.CylinderGeometry(0.06, 0.08, 0.58, 6),
+          WOOD,
+        ));
+        leg.position.set(x * 1.05, 0.29, z * 0.43);
+        group.add(leg);
+      }
+    }
+  } else if (type === "clay-pots") {
+    for (let index = 0; index < 3; index += 1) {
+      const pot = prepareMesh(new THREE.Mesh(
+        new THREE.SphereGeometry(0.36, 8, 6),
+        EVENT_CLOTH,
+      ));
+      pot.scale.y = 1.15;
+      pot.position.set((index - 1) * 0.58, 0.38, (index % 2) * 0.18);
+      group.add(pot);
+    }
+  } else if (type === "hay-stack") {
+    const hay = prepareMesh(new THREE.Mesh(
+      new THREE.ConeGeometry(1.25, 2.4, 10),
+      HAY,
+    ));
+    hay.position.y = 1.2;
+    group.add(hay);
+  } else if (type === "handpump") {
+    const stem = prepareMesh(new THREE.Mesh(
+      new THREE.CylinderGeometry(0.13, 0.18, 2.1, 7),
+      VILLAGE_BLUE,
+    ));
+    stem.position.y = 1.05;
+    const handle = prepareMesh(new THREE.Mesh(
+      new THREE.BoxGeometry(1.15, 0.1, 0.12),
+      VILLAGE_DARK,
+    ));
+    handle.position.set(0.32, 2.02, 0);
+    handle.rotation.z = 0.18;
+    group.add(stem, handle);
+  } else if (type === "bicycle") {
+    for (let side = -1; side <= 1; side += 2) {
+      const wheel = prepareMesh(new THREE.Mesh(
+        new THREE.TorusGeometry(0.48, 0.055, 6, 14),
+        VILLAGE_DARK,
+      ));
+      wheel.position.set(side * 0.72, 0.5, 0);
+      wheel.rotation.y = Math.PI / 2;
+      group.add(wheel);
+    }
+    const frame = prepareMesh(new THREE.Mesh(
+      new THREE.BoxGeometry(1.35, 0.07, 0.07),
+      VILLAGE_BLUE,
+    ));
+    frame.position.y = 0.72;
+    frame.rotation.z = 0.18;
+    group.add(frame);
+  } else if (type === "wooden-cart") {
+    const bed = prepareMesh(new THREE.Mesh(
+      new THREE.BoxGeometry(2.5, 0.42, 1.7),
+      WOOD,
+    ));
+    bed.position.y = 0.9;
+    group.add(bed);
+    for (let side = -1; side <= 1; side += 2) {
+      const wheel = prepareMesh(new THREE.Mesh(
+        new THREE.TorusGeometry(0.58, 0.075, 6, 14),
+        WHEEL,
+      ));
+      wheel.position.set(side * 1.22, 0.58, 0);
+      wheel.rotation.y = Math.PI / 2;
+      group.add(wheel);
+    }
+  } else if (type === "grain-sacks") {
+    for (let index = 0; index < 4; index += 1) {
+      const sack = prepareMesh(new THREE.Mesh(
+        new THREE.SphereGeometry(0.48, 8, 6),
+        HAY,
+      ));
+      sack.scale.set(1, 0.68, 0.78);
+      sack.position.set((index % 2 - 0.5) * 0.82, 0.35 + Math.floor(index / 2) * 0.48, 0);
+      group.add(sack);
+    }
+  } else {
+    const post = prepareMesh(new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.05, 1.8, 6),
+      WOOD,
+    ));
+    post.position.y = 0.9;
+    const light = prepareMesh(new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 8, 6),
+      DESTINATION_CLOTH,
+    ));
+    light.position.y = 1.72;
+    group.add(post, light);
+  }
+  group.name = `VillageProp-${type}`;
+  return { group, type };
+}
+
+function updateEntranceLabel(entrance, label) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 768;
+  canvas.height = 160;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#6f4528";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = "#e3b34c";
+  context.lineWidth = 12;
+  context.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+  context.fillStyle = "#fff4d2";
+  context.font = "700 54px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(label, canvas.width / 2, canvas.height / 2);
+  if (entrance.texture) entrance.texture.dispose();
+  entrance.texture = new THREE.CanvasTexture(canvas);
+  entrance.texture.colorSpace = THREE.SRGBColorSpace;
+  entrance.sign.material.map = entrance.texture;
+  entrance.sign.material.needsUpdate = true;
+}
+
+function createMissionVillage() {
+  const group = new THREE.Group();
+  group.name = "PersistentMissionVillage";
+  group.visible = false;
+  const entrance = createVillageEntrance();
+  group.add(entrance.group);
+
+  const square = prepareMesh(new THREE.Mesh(
+    new THREE.CircleGeometry(1, 28),
+    VILLAGE_GROUND,
+  ), false);
+  square.rotation.x = -Math.PI / 2;
+  group.add(square);
+
+  const houses = Array.from({ length: 20 }, (_, index) => {
+    const house = createVillageHouse();
+    house.group.visible = false;
+    house.body.material = index % 3 === 1 ? VILLAGE_BLUE : DESTINATION_PLASTER;
+    group.add(house.group);
+    return house;
+  });
+  const villagers = Array.from({ length: 20 }, (_, index) => {
+    const villager = createVillagePerson(index);
+    villager.group.visible = false;
+    group.add(villager.group);
+    return villager;
+  });
+  const animals = Array.from({ length: 8 }, (_, index) => {
+    const animal = createVillageAnimal(index);
+    animal.group.visible = false;
+    group.add(animal.group);
+    return animal;
+  });
+  const trees = Array.from({ length: 14 }, () => {
+    const tree = createVillageTree();
+    tree.visible = false;
+    group.add(tree);
+    return tree;
+  });
+  const fences = Array.from({ length: 14 }, () => {
+    const fence = prepareMesh(new THREE.Mesh(
+      new THREE.BoxGeometry(4.2, 0.65, 0.18),
+      DESTINATION_WOOD,
+    ));
+    fence.visible = false;
+    group.add(fence);
+    return fence;
+  });
+  const props = Array.from({ length: 24 }, (_, index) => {
+    const prop = createAmbientProp(
+      AMBIENT_PROP_TYPES[index % AMBIENT_PROP_TYPES.length],
+    );
+    prop.group.visible = false;
+    group.add(prop.group);
+    return prop;
+  });
+
+  const well = new THREE.Group();
+  const wellBase = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(1.35, 1.5, 1.05, 14),
+    ROCK_LIGHT,
+  ));
+  wellBase.position.y = 0.52;
+  const wellRim = prepareMesh(new THREE.Mesh(
+    new THREE.TorusGeometry(1.25, 0.16, 7, 18),
+    ROCK,
+  ));
+  wellRim.rotation.x = Math.PI / 2;
+  wellRim.position.y = 1.05;
+  well.add(wellBase, wellRim);
+  group.add(well);
+
+  const landmark = new THREE.Group();
+  const temple = new THREE.Group();
+  const templeBase = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(4.8, 3.8, 4.8),
+    DESTINATION_PLASTER,
+  ));
+  templeBase.position.y = 1.9;
+  const templeTower = prepareMesh(new THREE.Mesh(
+    new THREE.ConeGeometry(2.2, 6.4, 8),
+    DESTINATION_CLOTH,
+  ));
+  templeTower.position.y = 7;
+  temple.add(templeBase, templeTower);
+  const banyan = createVillageTree();
+  banyan.scale.set(2.1, 1.8, 2.1);
+  landmark.add(temple, banyan);
+  group.add(landmark);
+
+  const deliveryBuilding = createVillageHouse();
+  deliveryBuilding.group.scale.set(1.25, 1.08, 1.3);
+  group.add(deliveryBuilding.group);
+  return {
+    group,
+    entrance,
+    square,
+    houses,
+    villagers,
+    animals,
+    trees,
+    fences,
+    props,
+    well,
+    landmark,
+    temple,
+    banyan,
+    deliveryBuilding,
+    descriptor: null,
+    activeVillagerCount: 0,
+    activeAnimalCount: 0,
+    centreX: 0,
+    centreZ: 0,
+  };
 }
 
 function createCheckpointMarker(index) {
@@ -517,6 +873,12 @@ export function createRoadGameplay(scene) {
   directionVillagerGroup.name = "DirectionVillagers";
   const missionGroup = new THREE.Group();
   missionGroup.name = "MissionRouteMarkers";
+  const missionVillage = createMissionVillage();
+  const villageDebug = {
+    activeVillageName: "None",
+    activeVillagerCount: 0,
+    activeAnimalCount: 0,
+  };
   const destinationMarker = createDestinationMarker();
   const checkpointMarkers = [
     createCheckpointMarker(0),
@@ -529,6 +891,7 @@ export function createRoadGameplay(scene) {
     missionGroup.add(checkpointMarkers[index]);
   }
   group.add(
+    missionVillage.group,
     missionGroup,
     hazardGroup,
     eventGroup,
@@ -690,6 +1053,9 @@ export function createRoadGameplay(scene) {
         }
         continue;
       }
+      obstacle.group.name = `RouteHazard-${obstacle.regionType || "Unassigned"}-${
+        obstacle.regionVariant || obstacle.type
+      }`;
 
       routeSampler(
         obstacle.routeDistance,
@@ -774,6 +1140,9 @@ export function createRoadGameplay(scene) {
         );
       }
       if (!active) continue;
+      event.group.name = `RouteEvent-${event.regionType || "Unassigned"}-${
+        event.activity || event.type
+      }`;
 
       routeSampler(event.routeDistance, difficulty, eventRouteSample);
       const baseX = (
@@ -1109,9 +1478,398 @@ export function createRoadGameplay(scene) {
     marker.visible = true;
   }
 
-  function placeDestination(sample, villageName = "Village") {
+  function placeDestination(sample, villageName = "Village", lateralOffset = 0) {
     placeMarker(destinationMarker, sample, 0.012);
+    destinationMarker.position.x += sample.normalX * lateralOffset;
+    destinationMarker.position.z += sample.normalZ * lateralOffset;
     destinationMarker.name = `Destination-${villageName}`;
+  }
+
+  function placeVillageObject(
+    object,
+    routeDistance,
+    lateralOffset,
+    routeSampler,
+    difficulty,
+    rotationOffset = 0,
+    yOffset = 0,
+  ) {
+    routeSampler(routeDistance, difficulty, junctionSampleA);
+    object.position.set(
+      junctionSampleA.centerX + junctionSampleA.normalX * lateralOffset,
+      junctionSampleA.centerY + yOffset,
+      junctionSampleA.centerZ + junctionSampleA.normalZ * lateralOffset,
+    );
+    object.rotation.y = (
+      Math.atan2(junctionSampleA.tangentX, junctionSampleA.tangentZ)
+      + rotationOffset
+    );
+    object.visible = true;
+  }
+
+  function configureVillage(descriptor, routeSampler, difficulty) {
+    const random = seededVillageRandom(descriptor.seed);
+    const regionType = descriptor.region ? descriptor.region.type : "Farming";
+    const startDistance = descriptor.entrance.routeDistance;
+    const villageSpan = descriptor.routeDistance - startDistance + 24;
+    const zones = descriptor.activityZones;
+    const zoneByType = (type) => {
+      for (let index = 0; index < zones.length; index += 1) {
+        if (zones[index].type === type) return zones[index];
+      }
+      return zones[0];
+    };
+    missionVillage.descriptor = descriptor;
+    missionVillage.group.visible = true;
+    updateEntranceLabel(missionVillage.entrance, descriptor.entrance.label);
+    placeVillageObject(
+      missionVillage.entrance.group,
+      startDistance,
+      0,
+      routeSampler,
+      difficulty,
+    );
+
+    routeSampler(descriptor.square.routeDistance, difficulty, junctionSampleA);
+    missionVillage.square.position.set(
+      junctionSampleA.centerX,
+      junctionSampleA.centerY + 0.035,
+      junctionSampleA.centerZ,
+    );
+    missionVillage.square.scale.setScalar(descriptor.square.radius);
+    missionVillage.square.visible = true;
+    missionVillage.centreX = junctionSampleA.centerX;
+    missionVillage.centreZ = junctionSampleA.centerZ;
+
+    const ranks = Math.ceil(descriptor.size / 2);
+    for (let index = 0; index < missionVillage.houses.length; index += 1) {
+      const house = missionVillage.houses[index];
+      if (index >= descriptor.size) {
+        house.group.visible = false;
+        continue;
+      }
+      const side = index % 2 ? 1 : -1;
+      const rank = Math.floor(index / 2);
+      const progress = ranks <= 1 ? 0.5 : rank / (ranks - 1);
+      const routeDistance = startDistance + 10 + progress * (villageSpan - 18);
+      const lateral = side * (14.5 + random() * 5.5);
+      const scale = 0.82 + random() * 0.25;
+      house.body.material = regionType === "Riverside"
+        ? VILLAGE_BLUE
+        : regionType === "Dry Plains"
+          ? DESTINATION_PLASTER
+          : index % 3 === 1 ? VILLAGE_BLUE : DESTINATION_PLASTER;
+      house.roof.material = regionType === "Forest"
+        ? HAY
+        : VILLAGE_ROOF;
+      house.group.scale.setScalar(scale);
+      placeVillageObject(
+        house.group,
+        routeDistance,
+        lateral,
+        routeSampler,
+        difficulty,
+        side > 0 ? -Math.PI / 2 : Math.PI / 2,
+      );
+    }
+
+    const residentCount = Math.min(
+      missionVillage.villagers.length,
+      descriptor.population,
+    );
+    for (let index = 0; index < missionVillage.villagers.length; index += 1) {
+      const villager = missionVillage.villagers[index];
+      if (index >= residentCount) {
+        villager.group.visible = false;
+        continue;
+      }
+      const behaviorSequence = [
+        "chatting",
+        "chatting",
+        "sweeping",
+        "carrying-water",
+        "feeding-cows",
+        "sitting",
+        "resting",
+        "walking",
+      ];
+      const behavior = behaviorSequence[index % behaviorSequence.length];
+      let zone = zoneByType("village-square");
+      if (behavior === "sweeping") zone = zoneByType("houses");
+      else if (behavior === "carrying-water") zone = zoneByType("well");
+      else if (behavior === "feeding-cows") zone = zoneByType("animal-shed");
+      else if (behavior === "sitting") zone = zoneByType("tea-stall");
+      else if (behavior === "resting") {
+        zone = zoneByType(
+          descriptor.landmark === "Temple" ? "temple-area" : "banyan-tree",
+        );
+      }
+      const side = Math.sign(zone.lateralOffset) || (index % 2 ? 1 : -1);
+      const child = index < descriptor.populationBreakdown.children;
+      villager.baseScale = child ? 0.72 : 0.92 + random() * 0.12;
+      villager.group.scale.setScalar(villager.baseScale);
+      villager.behavior = behavior;
+      villager.pot.visible = behavior === "carrying-water";
+      villager.broom.visible = behavior === "sweeping";
+      placeVillageObject(
+        villager.group,
+        zone.routeDistance + (random() - 0.5) * zone.radius,
+        zone.lateralOffset + side * (1.2 + random() * Math.max(1.2, zone.radius * 0.35)),
+        routeSampler,
+        difficulty,
+        side > 0 ? -Math.PI / 2 : Math.PI / 2,
+      );
+      villager.anchorX = villager.group.position.x;
+      villager.anchorY = villager.group.position.y;
+      villager.anchorZ = villager.group.position.z;
+      villager.targetX = villager.anchorX + junctionSampleA.tangentX * (2 + random() * 2.5);
+      villager.targetZ = villager.anchorZ + junctionSampleA.tangentZ * (2 + random() * 2.5);
+      villager.baseRotation = villager.group.rotation.y;
+      villager.phase = random() * Math.PI * 2;
+    }
+
+    const animalCount = Math.min(
+      missionVillage.animals.length,
+      descriptor.populationBreakdown.cattle
+        + descriptor.populationBreakdown.buffaloes,
+    );
+    for (let index = 0; index < missionVillage.animals.length; index += 1) {
+      const animal = missionVillage.animals[index];
+      if (index >= animalCount) {
+        animal.group.visible = false;
+        continue;
+      }
+      const animalZone = zoneByType("animal-shed");
+      const side = Math.sign(animalZone.lateralOffset) || (index % 2 ? 1 : -1);
+      placeVillageObject(
+        animal.group,
+        animalZone.routeDistance + (random() - 0.5) * animalZone.radius,
+        animalZone.lateralOffset + side * (1 + random() * 3.5),
+        routeSampler,
+        difficulty,
+        random() * Math.PI * 2,
+      );
+      animal.anchorX = animal.group.position.x;
+      animal.anchorY = animal.group.position.y;
+      animal.anchorZ = animal.group.position.z;
+      animal.radius = 0.7 + random() * 1.6;
+      animal.baseRotation = animal.group.rotation.y;
+    }
+
+    const treeCount = Math.min(
+      missionVillage.trees.length,
+      descriptor.decorationCounts.trees,
+    );
+    for (let index = 0; index < missionVillage.trees.length; index += 1) {
+      const tree = missionVillage.trees[index];
+      if (index >= treeCount) {
+        tree.visible = false;
+        continue;
+      }
+      const side = index % 2 ? 1 : -1;
+      const scale = 0.75 + random() * 0.55;
+      tree.scale.setScalar(scale);
+      placeVillageObject(
+        tree,
+        startDistance + 4 + random() * villageSpan,
+        side * (21 + random() * 8),
+        routeSampler,
+        difficulty,
+        random() * Math.PI * 2,
+      );
+    }
+
+    const fenceCount = Math.min(
+      missionVillage.fences.length,
+      descriptor.decorationCounts.fences,
+    );
+    for (let index = 0; index < missionVillage.fences.length; index += 1) {
+      const fence = missionVillage.fences[index];
+      if (index >= fenceCount) {
+        fence.visible = false;
+        continue;
+      }
+      const side = index % 2 ? 1 : -1;
+      placeVillageObject(
+        fence,
+        startDistance + 7 + (index / Math.max(1, fenceCount - 1)) * (villageSpan - 10),
+        side * 11.8,
+        routeSampler,
+        difficulty,
+      );
+      fence.position.y += 0.36;
+    }
+
+    const propZoneTypes = [
+      "tea-stall",
+      "well",
+      "animal-shed",
+      "delivery-market",
+      "grain-market",
+      "houses",
+      "village-square",
+    ];
+    for (let index = 0; index < missionVillage.props.length; index += 1) {
+      const prop = missionVillage.props[index];
+      prop.group.scale.set(1, 1, 1);
+      if (regionType === "Riverside" && prop.type === "wooden-cart") {
+        prop.group.scale.set(1.45, 0.62, 0.72);
+      } else if (
+        regionType === "Riverside"
+        && prop.type === "clay-pots"
+      ) {
+        prop.group.scale.setScalar(1.2);
+      } else if (
+        regionType === "Farming"
+        && (prop.type === "grain-sacks" || prop.type === "hay-stack")
+      ) {
+        prop.group.scale.setScalar(1.25);
+      } else if (
+        regionType === "Forest"
+        && prop.type === "wooden-cart"
+      ) {
+        prop.group.scale.set(1.15, 1, 1.25);
+      }
+      let propZone = zoneByType(propZoneTypes[index % propZoneTypes.length]);
+      if (propZone === zones[0] && propZoneTypes[index % propZoneTypes.length] === "delivery-market") {
+        propZone = zoneByType("grain-market");
+      }
+      const side = Math.sign(propZone.lateralOffset) || (index % 2 ? 1 : -1);
+      placeVillageObject(
+        prop.group,
+        propZone.routeDistance + (random() - 0.5) * propZone.radius,
+        propZone.lateralOffset + side * (1.4 + random() * Math.max(1.4, propZone.radius * 0.45)),
+        routeSampler,
+        difficulty,
+        random() * Math.PI,
+      );
+    }
+
+    const wellZone = zoneByType("well");
+    placeVillageObject(
+      missionVillage.well,
+      wellZone.routeDistance,
+      wellZone.lateralOffset,
+      routeSampler,
+      difficulty,
+    );
+    const landmarkZone = zoneByType(
+      descriptor.landmark === "Temple" ? "temple-area" : "banyan-tree",
+    );
+    placeVillageObject(
+      missionVillage.landmark,
+      landmarkZone.routeDistance,
+      landmarkZone.lateralOffset,
+      routeSampler,
+      difficulty,
+    );
+    missionVillage.temple.visible = descriptor.landmark === "Temple";
+    missionVillage.banyan.visible = descriptor.landmark === "Banyan Tree";
+
+    const deliverySide = Math.sign(descriptor.deliveryPoint.lateralOffset) || 1;
+    missionVillage.deliveryBuilding.body.material = regionType === "Riverside"
+      ? VILLAGE_BLUE
+      : DESTINATION_PLASTER;
+    missionVillage.deliveryBuilding.roof.material = regionType === "Forest"
+      ? HAY
+      : VILLAGE_ROOF;
+    placeVillageObject(
+      missionVillage.deliveryBuilding.group,
+      descriptor.deliveryPoint.routeDistance + 2,
+      deliverySide * 11.5,
+      routeSampler,
+      difficulty,
+      deliverySide > 0 ? -Math.PI / 2 : Math.PI / 2,
+    );
+    missionVillage.activeVillagerCount = residentCount;
+    missionVillage.activeAnimalCount = animalCount;
+  }
+
+  function resetVillage() {
+    missionVillage.group.visible = false;
+    missionVillage.descriptor = null;
+    missionVillage.activeVillagerCount = 0;
+    missionVillage.activeAnimalCount = 0;
+    villageDebug.activeVillageName = "None";
+    villageDebug.activeVillagerCount = 0;
+    villageDebug.activeAnimalCount = 0;
+  }
+
+  function updateVillage(playerPosition, elapsed) {
+    if (!missionVillage.group.visible || !missionVillage.descriptor) {
+      villageDebug.activeVillageName = "None";
+      villageDebug.activeVillagerCount = 0;
+      villageDebug.activeAnimalCount = 0;
+      return;
+    }
+    const dx = playerPosition.x - missionVillage.centreX;
+    const dz = playerPosition.z - missionVillage.centreZ;
+    const nearby = dx * dx + dz * dz <= 170 * 170;
+    villageDebug.activeVillageName = nearby
+      ? missionVillage.descriptor.name
+      : "None";
+    villageDebug.activeVillagerCount = nearby
+      ? missionVillage.activeVillagerCount
+      : 0;
+    villageDebug.activeAnimalCount = nearby
+      ? missionVillage.activeAnimalCount
+      : 0;
+    if (!nearby) return;
+
+    for (let index = 0; index < missionVillage.activeVillagerCount; index += 1) {
+      const villager = missionVillage.villagers[index];
+      const root = villager.group;
+      const cycle = Math.sin(elapsed * 0.7 + villager.phase);
+      root.position.y = villager.anchorY;
+      root.rotation.x = 0;
+      root.rotation.z = 0;
+      root.rotation.y = villager.baseRotation;
+      if (villager.behavior === "walking" || villager.behavior === "carrying-water") {
+        const progress = cycle * 0.5 + 0.5;
+        root.position.x = villager.anchorX
+          + (villager.targetX - villager.anchorX) * progress;
+        root.position.z = villager.anchorZ
+          + (villager.targetZ - villager.anchorZ) * progress;
+        root.position.y += Math.abs(Math.sin(elapsed * 3.6 + villager.phase)) * 0.035;
+      } else {
+        root.position.x = villager.anchorX;
+        root.position.z = villager.anchorZ;
+      }
+      if (villager.behavior === "chatting") {
+        root.rotation.y += cycle * 0.16;
+        villager.body.rotation.z = Math.sin(elapsed * 1.8 + villager.phase) * 0.035;
+      } else if (villager.behavior === "sweeping") {
+        root.rotation.z = Math.sin(elapsed * 2.7 + villager.phase) * 0.08;
+        villager.broom.rotation.z = -0.38 + Math.sin(elapsed * 3.4 + villager.phase) * 0.34;
+      } else if (villager.behavior === "feeding-cows") {
+        root.rotation.x = 0.18 + cycle * 0.04;
+      } else if (villager.behavior === "sitting") {
+        root.position.y = villager.anchorY - 0.38;
+      } else if (villager.behavior === "resting") {
+        root.rotation.z = -0.08 + cycle * 0.018;
+      }
+    }
+
+    for (let index = 0; index < missionVillage.activeAnimalCount; index += 1) {
+      const animal = missionVillage.animals[index];
+      const root = animal.group;
+      root.position.y = animal.anchorY;
+      root.rotation.x = 0;
+      root.rotation.z = 0;
+      if (animal.behavior === "wandering") {
+        const angle = elapsed * 0.16 + animal.phase;
+        root.position.x = animal.anchorX + Math.cos(angle) * animal.radius;
+        root.position.z = animal.anchorZ + Math.sin(angle) * animal.radius;
+        root.rotation.y = -angle + Math.PI * 0.5;
+      } else {
+        root.position.x = animal.anchorX;
+        root.position.z = animal.anchorZ;
+        root.rotation.y = animal.baseRotation;
+        if (animal.behavior === "grazing") {
+          root.rotation.z = -0.1 + Math.sin(elapsed * 0.8 + animal.phase) * 0.025;
+        }
+      }
+    }
   }
 
   function placeCheckpoint(index, sample) {
@@ -1214,6 +1972,7 @@ export function createRoadGameplay(scene) {
     resetEvents();
     resetRouteNetwork();
     resetMissionMarkers();
+    resetVillage();
   }
 
   return {
@@ -1227,10 +1986,15 @@ export function createRoadGameplay(scene) {
     events,
     directionVillagers,
     destinationMarker,
+    missionVillage,
     checkpointMarkers,
     checkImpact,
     sampleSurface,
     placeDestination,
+    configureVillage,
+    updateVillage,
+    villageDebug,
+    resetVillage,
     placeCheckpoint,
     setCheckpointTriggered,
     resetMissionMarkers,

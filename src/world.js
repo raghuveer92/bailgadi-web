@@ -85,5 +85,22 @@ export function createWorld(scene) {
       hazardDescriptors,
       targetEvents,
     ),
+    generateRouteNetwork: (
+      startRouteDistance,
+      targetRouteDistance,
+      difficulty,
+      missionKey,
+      destinationVillageName,
+      targetJunctions,
+      targetMissionRoute,
+    ) => worldGenerator.generateRouteNetwork(
+      startRouteDistance,
+      targetRouteDistance,
+      difficulty,
+      missionKey,
+      destinationVillageName,
+      targetJunctions,
+      targetMissionRoute,
+    ),
   };
 }

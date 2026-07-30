@@ -10,6 +10,7 @@ export const SURFACE_GRAVEL = "GRAVEL";
 export const SURFACE_MUD = "MUD";
 export const MAX_ROUTE_HAZARDS = 24;
 export const MAX_ROUTE_EVENTS = 8;
+export const MAX_ROUTE_JUNCTIONS = 3;
 
 export const HAZARD_ROCK = "rock";
 export const HAZARD_FALLEN_BRANCH = "fallen-branch";
@@ -23,6 +24,10 @@ export const EVENT_VILLAGE_CROWD = "village-crowd";
 export const EVENT_ROAD_REPAIR = "road-repair";
 export const EVENT_MARKET_SPILL = "small-market-spill";
 export const EVENT_WATER_PUDDLE = "water-puddle";
+export const JUNCTION_LEFT_RIGHT = "left-right-fork";
+export const JUNCTION_STRAIGHT_LEFT = "straight-left";
+export const JUNCTION_STRAIGHT_RIGHT = "straight-right";
+export const JUNCTION_THREE_WAY = "three-way";
 
 const ROAD_SEGMENTS = 24;
 const SURFACE_CENTER_RATIO = 0.65;
@@ -1203,6 +1208,120 @@ export class RoadGenerator {
     }
     return eventCount;
   }
+
+  generateRouteNetwork(
+    startRouteDistance,
+    targetRouteDistance,
+    difficulty = 1,
+    missionKey = 0,
+    destinationVillageName,
+    targetJunctions,
+    targetMissionRoute,
+  ) {
+    const level = Math.max(1, Math.floor(difficulty));
+    const missionSalt = Math.max(0, Math.floor(missionKey));
+    const junctionCount = Math.min(
+      targetJunctions.length,
+      level <= 1 ? 2 : MAX_ROUTE_JUNCTIONS,
+    );
+    const startRouteId = `route-${missionSalt}-start`;
+    let incomingRouteId = startRouteId;
+
+    targetMissionRoute.destinationVillageName = destinationVillageName;
+    targetMissionRoute.startRouteId = startRouteId;
+    for (
+      let index = 0;
+      index < targetMissionRoute.correctRouteIds.length;
+      index += 1
+    ) {
+      targetMissionRoute.correctRouteIds[index] = null;
+    }
+    targetMissionRoute.correctRouteIds[0] = startRouteId;
+    targetMissionRoute.junctionCount = junctionCount;
+
+    for (let index = 0; index < junctionCount; index += 1) {
+      const descriptor = targetJunctions[index];
+      const deterministicIndex = missionSalt * 211 + index * 37 + level * 101;
+      const junctionHash = hashUint(this.seed, deterministicIndex, 907);
+      const typeIndex = junctionHash % 4;
+      const type = typeIndex === 0
+        ? JUNCTION_LEFT_RIGHT
+        : typeIndex === 1
+          ? JUNCTION_STRAIGHT_LEFT
+          : typeIndex === 2
+            ? JUNCTION_STRAIGHT_RIGHT
+            : JUNCTION_THREE_WAY;
+      const routeDistance = junctionCount === 2
+        ? targetRouteDistance - (index === 0 ? 365 : 165)
+        : targetRouteDistance - (
+          index === 0 ? 365 : index === 1 ? 265 : 165
+        );
+      const id = `junction-${missionSalt}-${index}`;
+
+      descriptor.id = id;
+      descriptor.type = type;
+      descriptor.routeDistance = routeDistance;
+      descriptor.incomingRouteId = incomingRouteId;
+      descriptor.destinationVillageName = destinationVillageName;
+      descriptor.villagerSpawnRouteDistance = routeDistance - 5;
+      descriptor.wrongVillagerSpawnRouteDistance = routeDistance + 22;
+      descriptor.outgoingRoutes.length = 0;
+
+      if (
+        type === JUNCTION_STRAIGHT_LEFT
+        || type === JUNCTION_STRAIGHT_RIGHT
+        || type === JUNCTION_THREE_WAY
+      ) {
+        descriptor.outgoingRoutes.push({
+          id: `${id}-straight`,
+          direction: "STRAIGHT",
+        });
+      }
+      if (
+        type === JUNCTION_LEFT_RIGHT
+        || type === JUNCTION_STRAIGHT_LEFT
+        || type === JUNCTION_THREE_WAY
+      ) {
+        descriptor.outgoingRoutes.push({
+          id: `${id}-left`,
+          direction: "LEFT",
+        });
+      }
+      if (
+        type === JUNCTION_LEFT_RIGHT
+        || type === JUNCTION_STRAIGHT_RIGHT
+        || type === JUNCTION_THREE_WAY
+      ) {
+        descriptor.outgoingRoutes.push({
+          id: `${id}-right`,
+          direction: "RIGHT",
+        });
+      }
+
+      const correctIndex = hashUint(
+        this.seed,
+        deterministicIndex,
+        919,
+      ) % descriptor.outgoingRoutes.length;
+      const correctRoute = descriptor.outgoingRoutes[correctIndex];
+      descriptor.correctOutgoingRouteId = correctRoute.id;
+      descriptor.correctDirection = correctRoute.direction;
+      descriptor.chunkIndex = Math.floor(routeDistance / CHUNK_LENGTH);
+      descriptor.active = true;
+      targetMissionRoute.correctRouteIds[index + 1] = correctRoute.id;
+      incomingRouteId = correctRoute.id;
+    }
+
+    for (
+      let index = junctionCount;
+      index < targetJunctions.length;
+      index += 1
+    ) {
+      targetJunctions[index].active = false;
+    }
+    targetMissionRoute.destinationRouteId = incomingRouteId;
+    return junctionCount;
+  }
 }
 
 export class EnvironmentGenerator {
@@ -1942,6 +2061,26 @@ export class WorldGenerator {
       checkpointStates,
       hazardDescriptors,
       targetEvents,
+    );
+  }
+
+  generateRouteNetwork(
+    startRouteDistance,
+    targetRouteDistance,
+    difficulty,
+    missionKey,
+    destinationVillageName,
+    targetJunctions,
+    targetMissionRoute,
+  ) {
+    return this.roadGenerator.generateRouteNetwork(
+      startRouteDistance,
+      targetRouteDistance,
+      difficulty,
+      missionKey,
+      destinationVillageName,
+      targetJunctions,
+      targetMissionRoute,
     );
   }
 

@@ -12,6 +12,7 @@ import {
 } from "./cart.js";
 import { DustSystem } from "./dust-system.js";
 import {
+  MAX_ROUTE_JUNCTIONS,
   SURFACE_DIRT,
   SURFACE_GRASS,
   SURFACE_GRAVEL,
@@ -40,6 +41,12 @@ const ROAD_OFF_ROAD_RESISTANCE_MIN = 0.025;
 const ROAD_OFF_ROAD_RESISTANCE_MAX = 0.08;
 const DESTINATION_ROUTE_TOLERANCE = 5;
 const DESTINATION_LATERAL_TOLERANCE = 7.5;
+const ROUTE_BRANCH_LENGTH = 52;
+const ROUTE_BRANCH_OFFSET = 12;
+const ROUTE_CHOICE_DISTANCE = 6;
+const DIRECTION_ASK_RANGE = 12.5;
+const DIRECTION_DIALOGUE_DURATION = 5.5;
+const DIRECTION_GUIDANCE_DURATION = 7;
 const SURFACE_BLEND_RESPONSE = 4.5;
 const SURFACE_PROFILES = Object.freeze({
   [SURFACE_ROAD]: Object.freeze({
@@ -84,6 +91,14 @@ const SURFACE_PROFILES = Object.freeze({
   }),
 });
 const CHECKPOINTS = [400, 300, 200, 100];
+const DESTINATION_VILLAGES = Object.freeze([
+  Object.freeze({ id: "rampur", name: "Rampur" }),
+  Object.freeze({ id: "devpura", name: "Devpura" }),
+  Object.freeze({ id: "nandgaon", name: "Nandgaon" }),
+  Object.freeze({ id: "kheda", name: "Kheda" }),
+  Object.freeze({ id: "shivpura", name: "Shivpura" }),
+  Object.freeze({ id: "chandpur", name: "Chandpur" }),
+]);
 const MISSIONS = Object.freeze([
   Object.freeze({
     name: "Rice Delivery",
@@ -93,6 +108,8 @@ const MISSIONS = Object.freeze([
     timeLimit: 240,
     roadRoughness: 1,
     level: 1,
+    destinationVillageId: "rampur",
+    destinationVillageName: "Rampur",
   }),
   Object.freeze({
     name: "Morning Milk Run",
@@ -102,6 +119,8 @@ const MISSIONS = Object.freeze([
     timeLimit: 255,
     roadRoughness: 1.08,
     level: 2,
+    destinationVillageId: "devpura",
+    destinationVillageName: "Devpura",
   }),
   Object.freeze({
     name: "Market Vegetables",
@@ -111,6 +130,8 @@ const MISSIONS = Object.freeze([
     timeLimit: 270,
     roadRoughness: 1.15,
     level: 3,
+    destinationVillageId: "nandgaon",
+    destinationVillageName: "Nandgaon",
   }),
   Object.freeze({
     name: "Timber Haul",
@@ -120,6 +141,8 @@ const MISSIONS = Object.freeze([
     timeLimit: 285,
     roadRoughness: 1.23,
     level: 4,
+    destinationVillageId: "kheda",
+    destinationVillageName: "Kheda",
   }),
   Object.freeze({
     name: "Clay Pot Delivery",
@@ -129,6 +152,8 @@ const MISSIONS = Object.freeze([
     timeLimit: 300,
     roadRoughness: 1.32,
     level: 5,
+    destinationVillageId: "shivpura",
+    destinationVillageName: "Shivpura",
   }),
 ]);
 
@@ -154,6 +179,11 @@ const cargoStabilityBar = document.querySelector(".cargo-stability-bar");
 const speedLabel = document.querySelector("#speed");
 const speedModeLabel = document.querySelector("#speed-mode");
 const checkpointMessage = document.querySelector("#checkpoint-message");
+const askDirectionButton = document.querySelector("#ask-direction-button");
+const directionDialogueElement = document.querySelector("#direction-dialogue");
+const directionDriverLine = document.querySelector("#direction-driver-line");
+const directionVillagerLine = document.querySelector("#direction-villager-line");
+const directionGuidance = document.querySelector("#direction-guidance");
 const voiceButton = document.querySelector("#voice-button");
 const voiceLabel = document.querySelector("#voice-label");
 const voiceMessage = document.querySelector("#voice-message");
@@ -222,6 +252,7 @@ const {
   worldGenerator,
   generateEventDescriptors,
   generateHazardDescriptors,
+  generateRouteNetwork,
   getRoutePosition,
   sampleRouteDistance,
   sampleRoad,
@@ -291,6 +322,31 @@ const aheadRoadPosition = { x: 0, z: 0 };
 const behindRoadPosition = { x: 0, z: 0 };
 const candidateRoadPosition = { x: 0, z: 0 };
 const missionRouteSample = {};
+const junctionDescriptors = new Array(MAX_ROUTE_JUNCTIONS);
+for (let index = 0; index < junctionDescriptors.length; index += 1) {
+  junctionDescriptors[index] = {
+    id: "None",
+    type: "three-way",
+    routeDistance: 0,
+    incomingRouteId: "None",
+    outgoingRoutes: [],
+    correctOutgoingRouteId: "None",
+    correctDirection: "STRAIGHT",
+    destinationVillageName: "None",
+    villagerSpawnRouteDistance: 0,
+    wrongVillagerSpawnRouteDistance: 0,
+    chunkIndex: 0,
+    active: false,
+  };
+}
+const missionRouteNetwork = {
+  destinationVillageName: MISSIONS[0].destinationVillageName,
+  startRouteId: "route-0-start",
+  correctRouteIds: new Array(MAX_ROUTE_JUNCTIONS + 1),
+  destinationRouteId: "route-0-start",
+  junctionCount: 0,
+  junctions: junctionDescriptors,
+};
 const checkpointMarkerStates = [
   {
     remainingDistance: CHECKPOINTS[0],
@@ -358,6 +414,55 @@ const eventState = {
   nearestEvent: -1,
   eventSeed: 0,
 };
+const navigationState = {
+  destinationVillageId: MISSIONS[0].destinationVillageId,
+  destinationVillageName: MISSIONS[0].destinationVillageName,
+  currentRouteId: "route-0-start",
+  correctRouteId: "route-0-start",
+  activeJunctionId: "None",
+  nearestVillagerId: "None",
+  nearestDirectionVillagerId: "None",
+  canAsk: false,
+  canAskDirection: false,
+  isOnWrongRoute: false,
+  lastAskedJunctionId: "None",
+  guidanceDirection: "NONE",
+  guidanceTimeRemaining: 0,
+  dialogueActive: false,
+  dialogueTimeRemaining: 0,
+  lastDirectionGiven: "None",
+  nextJunctionRouteDistance: -1,
+  currentJunctionIndex: -1,
+  selectedJunctionId: "None",
+  branchDirection: "STRAIGHT",
+  branchJunctionRouteDistance: 0,
+  physicalRouteDistance: 0,
+  wrongRouteTravelDistance: 0,
+  lastPhysicalRouteDistance: 0,
+  askUiVisible: false,
+};
+const driverDirectionDialogue = {
+  dialogueId: "driver_ask",
+  speaker: "driver",
+  text: "",
+  audioKey: "",
+  destinationVillageName: "",
+  direction: "NONE",
+  isWrongRoute: false,
+};
+const villagerDirectionDialogue = {
+  dialogueId: "villager_direction",
+  speaker: "villager",
+  text: "",
+  audioKey: "",
+  destinationVillageName: "",
+  direction: "NONE",
+  isWrongRoute: false,
+};
+const directionDialogueState = {
+  driver: driverDirectionDialogue,
+  villager: villagerDirectionDialogue,
+};
 const roadState = {
   zone: ROAD_ZONE_CENTER,
   lateralOffset: 0,
@@ -400,6 +505,7 @@ const state = {
   cameraDistance: 0,
   movementDebugTimer: 0,
   hudProgressBucket: -1,
+  missionHudIndex: -1,
   stabilityHudBucket: -1,
   cargoImpact: 0,
   cargoCameraFeedback: 0,
@@ -472,8 +578,142 @@ function missionStartZ() {
   return MISSION_END_Z - state.mission.distance;
 }
 
+function routeDirectionForId(descriptor, routeId) {
+  for (let index = 0; index < descriptor.outgoingRoutes.length; index += 1) {
+    if (descriptor.outgoingRoutes[index].id === routeId) {
+      return descriptor.outgoingRoutes[index].direction;
+    }
+  }
+  return "NONE";
+}
+
+function routeIdForDirection(descriptor, direction) {
+  for (let index = 0; index < descriptor.outgoingRoutes.length; index += 1) {
+    if (descriptor.outgoingRoutes[index].direction === direction) {
+      return descriptor.outgoingRoutes[index].id;
+    }
+  }
+  return "None";
+}
+
+function updateNavigationRouteChoice(physicalRouteDistance) {
+  navigationState.physicalRouteDistance = physicalRouteDistance;
+  navigationState.nextJunctionRouteDistance = -1;
+  let nearbyJunctionIndex = -1;
+
+  for (let index = 0; index < missionRouteNetwork.junctionCount; index += 1) {
+    const junction = junctionDescriptors[index];
+    const delta = physicalRouteDistance - junction.routeDistance;
+    if (
+      navigationState.nextJunctionRouteDistance < 0
+      && delta < -ROUTE_CHOICE_DISTANCE
+    ) {
+      navigationState.nextJunctionRouteDistance = junction.routeDistance;
+    }
+    if (
+      navigationState.currentRouteId === junction.incomingRouteId
+      && delta >= -ROUTE_CHOICE_DISTANCE
+      && delta <= 12
+    ) {
+      let chosenDirection = state.lateralOffset > 1
+        ? "LEFT"
+        : state.lateralOffset < -1 ? "RIGHT" : "STRAIGHT";
+      let chosenRouteId = routeIdForDirection(junction, chosenDirection);
+      if (chosenRouteId === "None") {
+        chosenDirection = junction.correctDirection;
+        chosenRouteId = junction.correctOutgoingRouteId;
+      }
+      navigationState.currentRouteId = chosenRouteId;
+      navigationState.correctRouteId = junction.correctOutgoingRouteId;
+      navigationState.selectedJunctionId = junction.id;
+      navigationState.currentJunctionIndex = index;
+      navigationState.branchDirection = chosenDirection;
+      navigationState.branchJunctionRouteDistance = junction.routeDistance;
+      navigationState.isOnWrongRoute = (
+        chosenRouteId !== junction.correctOutgoingRouteId
+      );
+      nearbyJunctionIndex = index;
+    } else if (
+      routeDirectionForId(junction, navigationState.currentRouteId) !== "NONE"
+    ) {
+      nearbyJunctionIndex = index;
+      navigationState.correctRouteId = junction.correctOutgoingRouteId;
+      if (delta < -8 && state.speed < 0) {
+        navigationState.currentRouteId = junction.incomingRouteId;
+        navigationState.correctRouteId = junction.incomingRouteId;
+        navigationState.selectedJunctionId = "None";
+        navigationState.currentJunctionIndex = -1;
+        navigationState.branchDirection = "STRAIGHT";
+        navigationState.isOnWrongRoute = false;
+      } else if (delta > ROUTE_BRANCH_LENGTH - 6) {
+        navigationState.currentRouteId = junction.correctOutgoingRouteId;
+        navigationState.correctRouteId = junction.correctOutgoingRouteId;
+        navigationState.selectedJunctionId = "None";
+        navigationState.currentJunctionIndex = -1;
+        navigationState.branchDirection = "STRAIGHT";
+        navigationState.isOnWrongRoute = false;
+        nearbyJunctionIndex = -1;
+      }
+    }
+    if (Math.abs(delta) <= 58) nearbyJunctionIndex = index;
+  }
+
+  navigationState.activeJunctionId = nearbyJunctionIndex >= 0
+    ? junctionDescriptors[nearbyJunctionIndex].id
+    : "None";
+}
+
+function applyNavigationRouteSample(sample, worldX) {
+  if (
+    navigationState.selectedJunctionId === "None"
+    || navigationState.branchDirection === "STRAIGHT"
+  ) {
+    return sample;
+  }
+  const progress = THREE.MathUtils.clamp(
+    (
+      sample.routeDistance
+      - (navigationState.branchJunctionRouteDistance - ROUTE_CHOICE_DISTANCE)
+    ) / ROUTE_BRANCH_LENGTH,
+    0,
+    1,
+  );
+  const side = navigationState.branchDirection === "LEFT" ? 1 : -1;
+  const offset = Math.sin(progress * Math.PI) * ROUTE_BRANCH_OFFSET * side;
+  const offsetSlope = (
+    Math.cos(progress * Math.PI)
+    * Math.PI
+    * ROUTE_BRANCH_OFFSET
+    * side
+    / ROUTE_BRANCH_LENGTH
+  );
+  const normalX = sample.tangentZ;
+  const normalZ = -sample.tangentX;
+  const tangentX = sample.tangentX + normalX * offsetSlope;
+  const tangentZ = sample.tangentZ + normalZ * offsetSlope;
+  const tangentLength = Math.hypot(tangentX, tangentZ);
+  sample.centerX += normalX * offset;
+  sample.tangentX = tangentX / tangentLength;
+  sample.tangentZ = tangentZ / tangentLength;
+  sample.normalX = sample.tangentZ;
+  sample.normalZ = -sample.tangentX;
+  sample.width = Math.max(5.2, sample.width * 0.38);
+  if (typeof worldX === "number") {
+    const signedOffset = (
+      (worldX - sample.centerX) * sample.tangentZ
+    );
+    sample.normalizedOffset = signedOffset / (sample.width * 0.5);
+    sample.distanceFromCenter = Math.abs(signedOffset);
+    sample.isOnRoad = sample.distanceFromCenter <= sample.width * 0.5;
+  }
+  sample.surfaceType = SURFACE_ROAD;
+  return sample;
+}
+
 function updateCurrentRoadSample() {
   getRoutePosition(cart.position, state.mission.level, currentRoadSample);
+  updateNavigationRouteChoice(currentRoadSample.routeDistance);
+  applyNavigationRouteSample(currentRoadSample, cart.position.x);
   state.roadHeading = Math.atan2(
     currentRoadSample.tangentX,
     currentRoadSample.tangentZ,
@@ -492,7 +732,15 @@ function updateRoadSamples() {
   behindRoadPosition.z = cart.position.z
     - currentRoadSample.tangentZ * sampleDistance;
   sampleRoad(aheadRoadPosition, state.mission.level, aheadRoadSample);
+  aheadRoadSample.routeDistance = (
+    currentRoadSample.routeDistance + sampleDistance
+  );
+  applyNavigationRouteSample(aheadRoadSample, aheadRoadPosition.x);
   sampleRoad(behindRoadPosition, state.mission.level, behindRoadSample);
+  behindRoadSample.routeDistance = (
+    currentRoadSample.routeDistance - sampleDistance
+  );
+  applyNavigationRouteSample(behindRoadSample, behindRoadPosition.x);
 }
 
 function updateTerrainPose(delta, snap = false) {
@@ -574,7 +822,10 @@ function rebuildMissionRouteMarkers() {
     state.mission.level,
     missionRouteSample,
   );
-  roadGameplay.placeDestination(missionRouteSample);
+  roadGameplay.placeDestination(
+    missionRouteSample,
+    navigationState.destinationVillageName,
+  );
   missionMarkerState.destinationRouteDistance =
     routeState.targetRouteDistance;
   missionMarkerState.destinationWorldPosition.x = missionRouteSample.centerX;
@@ -702,6 +953,64 @@ function rebuildProceduralEvents() {
   updateEventState();
 }
 
+function closeDirectionDialogue() {
+  navigationState.dialogueActive = false;
+  navigationState.dialogueTimeRemaining = 0;
+  directionDialogueElement.classList.add("hidden");
+}
+
+function resetNavigationState() {
+  const destination = DESTINATION_VILLAGES[
+    state.missionIndex % DESTINATION_VILLAGES.length
+  ];
+  navigationState.destinationVillageId = destination.id;
+  navigationState.destinationVillageName = destination.name;
+  navigationState.currentRouteId = missionRouteNetwork.startRouteId;
+  navigationState.correctRouteId = missionRouteNetwork.startRouteId;
+  navigationState.activeJunctionId = "None";
+  navigationState.nearestVillagerId = "None";
+  navigationState.nearestDirectionVillagerId = "None";
+  navigationState.canAsk = false;
+  navigationState.canAskDirection = false;
+  navigationState.isOnWrongRoute = false;
+  navigationState.lastAskedJunctionId = "None";
+  navigationState.guidanceDirection = "NONE";
+  navigationState.guidanceTimeRemaining = 0;
+  navigationState.lastDirectionGiven = "None";
+  navigationState.nextJunctionRouteDistance = -1;
+  navigationState.currentJunctionIndex = -1;
+  navigationState.selectedJunctionId = "None";
+  navigationState.branchDirection = "STRAIGHT";
+  navigationState.branchJunctionRouteDistance = 0;
+  navigationState.physicalRouteDistance = currentRoadSample.routeDistance;
+  navigationState.wrongRouteTravelDistance = 0;
+  navigationState.lastPhysicalRouteDistance =
+    currentRoadSample.routeDistance;
+  navigationState.askUiVisible = false;
+  askDirectionButton.classList.add("hidden");
+  closeDirectionDialogue();
+  roadGameplay.setVillagerGuidance("None", "NONE", false);
+}
+
+function rebuildRouteNetwork() {
+  missionRouteNetwork.junctionCount = generateRouteNetwork(
+    routeState.startRouteDistance,
+    routeState.targetRouteDistance,
+    state.mission.level,
+    state.missionIndex,
+    state.mission.destinationVillageName,
+    junctionDescriptors,
+    missionRouteNetwork,
+  );
+  resetNavigationState();
+  roadGameplay.configureRouteNetwork(
+    junctionDescriptors,
+    missionRouteNetwork.junctionCount,
+    sampleRouteDistance,
+    state.mission.level,
+  );
+}
+
 function initializeMissionRoute() {
   routeState.currentRouteDistance = currentRoadSample.routeDistance;
   routeState.startRouteDistance = currentRoadSample.routeDistance;
@@ -716,6 +1025,7 @@ function initializeMissionRoute() {
   routeState.chunkIndex = currentRoadSample.chunkIndex;
   routeState.localDistance = currentRoadSample.localDistance;
   state.progress = 0;
+  rebuildRouteNetwork();
   rebuildMissionRouteMarkers();
   rebuildProceduralHazards();
   rebuildProceduralEvents();
@@ -860,7 +1170,8 @@ function sceneryObstacleHit(nextX, nextZ) {
 
 function showCheckpoint(remaining) {
   window.clearTimeout(checkpointTimer);
-  checkpointMessage.textContent = `${remaining} m to the village`;
+  checkpointMessage.textContent =
+    `${remaining} m to ${navigationState.destinationVillageName}`;
   checkpointMessage.classList.remove("hidden");
   checkpointTimer = window.setTimeout(() => {
     checkpointMessage.classList.add("hidden");
@@ -900,8 +1211,8 @@ function completeJourney() {
   state.nextMissionIndex = (state.missionIndex + 1) % MISSIONS.length;
   showMissionResult(
     "Journey complete",
-    "Village Reached!",
-    `The ${CARGO_TYPES[state.mission.cargoType].label.toLowerCase()} arrived safely.`,
+    `${navigationState.destinationVillageName} Reached!`,
+    `The ${CARGO_TYPES[state.mission.cargoType].label.toLowerCase()} arrived safely in ${navigationState.destinationVillageName}.`,
     "NEXT MISSION",
   );
 }
@@ -926,9 +1237,168 @@ function failCargoMission() {
   );
 }
 
+function junctionForId(junctionId) {
+  for (let index = 0; index < missionRouteNetwork.junctionCount; index += 1) {
+    if (junctionDescriptors[index].id === junctionId) {
+      return junctionDescriptors[index];
+    }
+  }
+  return null;
+}
+
+function updateDirectionInteraction(delta) {
+  if (navigationState.guidanceTimeRemaining > 0) {
+    navigationState.guidanceTimeRemaining = Math.max(
+      0,
+      navigationState.guidanceTimeRemaining - delta,
+    );
+    if (navigationState.guidanceTimeRemaining === 0) {
+      navigationState.guidanceDirection = "NONE";
+      roadGameplay.setVillagerGuidance("None", "NONE", false);
+    }
+  }
+  if (navigationState.dialogueActive) {
+    navigationState.dialogueTimeRemaining = Math.max(
+      0,
+      navigationState.dialogueTimeRemaining - delta,
+    );
+    if (navigationState.dialogueTimeRemaining === 0) {
+      closeDirectionDialogue();
+    }
+  }
+
+  let nearestVillagerId = "None";
+  let nearestDistanceSquared = Number.POSITIVE_INFINITY;
+  for (
+    let index = 0;
+    index < roadGameplay.directionVillagers.length;
+    index += 1
+  ) {
+    const villager = roadGameplay.directionVillagers[index];
+    if (
+      !villager.active
+      || villager.junctionId !== navigationState.activeJunctionId
+      || (
+        navigationState.isOnWrongRoute
+          ? (
+            !villager.isWrongRouteHelper
+            || villager.routeId !== navigationState.currentRouteId
+          )
+          : villager.isWrongRouteHelper
+      )
+    ) {
+      continue;
+    }
+    const dx = villager.x - cart.position.x;
+    const dz = villager.z - cart.position.z;
+    const distanceSquared = dx * dx + dz * dz;
+    if (distanceSquared < nearestDistanceSquared) {
+      nearestDistanceSquared = distanceSquared;
+      nearestVillagerId = villager.id;
+    }
+  }
+
+  navigationState.nearestVillagerId = nearestVillagerId;
+  navigationState.nearestDirectionVillagerId = nearestVillagerId;
+  navigationState.canAsk = (
+    state.journeyStatus === "playing"
+    && nearestDistanceSquared <= DIRECTION_ASK_RANGE * DIRECTION_ASK_RANGE
+    && !navigationState.dialogueActive
+  );
+  navigationState.canAskDirection = navigationState.canAsk;
+  if (navigationState.askUiVisible !== navigationState.canAsk) {
+    navigationState.askUiVisible = navigationState.canAsk;
+    askDirectionButton.classList.toggle(
+      "hidden",
+      !navigationState.canAsk,
+    );
+  }
+}
+
+function directionLabel(direction) {
+  if (direction === "LEFT") return "LEFT";
+  if (direction === "RIGHT") return "RIGHT";
+  return "STRAIGHT";
+}
+
+function askVillagerForDirection() {
+  if (!navigationState.canAsk) return;
+  const junction = junctionForId(navigationState.activeJunctionId);
+  if (!junction) return;
+  const direction = junction.correctDirection;
+  const isWrongRoute = navigationState.isOnWrongRoute;
+  const villageName = navigationState.destinationVillageName;
+
+  driverDirectionDialogue.dialogueId =
+    `driver_ask_${state.mission.destinationVillageId}`;
+  driverDirectionDialogue.text =
+    `Ram Ram sa... ${villageName} ka rasta kidhar hai?`;
+  driverDirectionDialogue.audioKey =
+    `driver_ask_${state.mission.destinationVillageId}`;
+  driverDirectionDialogue.destinationVillageName = villageName;
+  driverDirectionDialogue.direction = direction;
+  driverDirectionDialogue.isWrongRoute = isWrongRoute;
+
+  villagerDirectionDialogue.dialogueId = isWrongRoute
+    ? `villager_wrong_return_${direction.toLowerCase()}`
+    : `villager_${direction.toLowerCase()}`;
+  villagerDirectionDialogue.audioKey =
+    villagerDirectionDialogue.dialogueId;
+  villagerDirectionDialogue.destinationVillageName = villageName;
+  villagerDirectionDialogue.direction = direction;
+  villagerDirectionDialogue.isWrongRoute = isWrongRoute;
+  if (isWrongRoute) {
+    const returnDirection = direction === "LEFT"
+      ? "baaye mudna"
+      : direction === "RIGHT" ? "daaye mudna" : "seedha jaana";
+    villagerDirectionDialogue.text =
+      `Bhai, ye ${villageName} ka rasta nahi hai. Wapas chaurahe tak jao, phir ${returnDirection}.`;
+  } else if (direction === "LEFT") {
+    villagerDirectionDialogue.text =
+      "Is chaurahe se baaye mud jao.";
+  } else if (direction === "RIGHT") {
+    villagerDirectionDialogue.text =
+      "Is chaurahe se daaye mud jao.";
+  } else {
+    villagerDirectionDialogue.text = "Seedha jao.";
+  }
+
+  directionDriverLine.textContent = driverDirectionDialogue.text;
+  directionVillagerLine.textContent = villagerDirectionDialogue.text;
+  directionGuidance.textContent = isWrongRoute
+    ? `RETURN · THEN ${directionLabel(direction)}`
+    : directionLabel(direction);
+  directionDialogueElement.classList.remove("hidden");
+  askDirectionButton.classList.add("hidden");
+  navigationState.askUiVisible = false;
+  navigationState.canAsk = false;
+  navigationState.canAskDirection = false;
+  navigationState.dialogueActive = true;
+  navigationState.dialogueTimeRemaining = DIRECTION_DIALOGUE_DURATION;
+  navigationState.lastAskedJunctionId = junction.id;
+  navigationState.guidanceDirection = direction;
+  navigationState.guidanceTimeRemaining = DIRECTION_GUIDANCE_DURATION;
+  navigationState.lastDirectionGiven = isWrongRoute
+    ? `RETURN_${direction}`
+    : direction;
+  roadGameplay.setVillagerGuidance(
+    navigationState.nearestVillagerId,
+    direction,
+    true,
+  );
+}
+
 function updateJourneyProgress() {
   if (state.journeyStatus !== "playing") return;
-  routeState.currentRouteDistance = currentRoadSample.routeDistance;
+  const physicalRouteDistance = currentRoadSample.routeDistance;
+  if (navigationState.isOnWrongRoute) {
+    navigationState.wrongRouteTravelDistance += Math.abs(
+      physicalRouteDistance - navigationState.lastPhysicalRouteDistance,
+    );
+  } else {
+    routeState.currentRouteDistance = physicalRouteDistance;
+  }
+  navigationState.lastPhysicalRouteDistance = physicalRouteDistance;
   routeState.travelledRouteDistance = Math.max(
     0,
     routeState.currentRouteDistance - routeState.startRouteDistance,
@@ -957,6 +1427,7 @@ function updateJourneyProgress() {
     );
     if (
       routeState.currentRouteDistance >= checkpointRouteDistance
+      && !navigationState.isOnWrongRoute
       && !state.passedCheckpoints.has(checkpoint)
     ) {
       state.passedCheckpoints.add(checkpoint);
@@ -989,6 +1460,15 @@ function updateJourneyProgress() {
   );
   routeState.completionEligible = (
     routeState.currentRouteDistance >= routeState.targetRouteDistance
+    && !navigationState.isOnWrongRoute
+    && (
+      navigationState.currentRouteId
+      === missionRouteNetwork.destinationRouteId
+    )
+    && (
+      navigationState.destinationVillageId
+      === state.mission.destinationVillageId
+    )
     && missionMarkerState.arrivalZoneActive
   );
   if (routeState.completionEligible) beginJourneyFinish();
@@ -1094,6 +1574,10 @@ function updateMovement(delta) {
   candidateRoadPosition.x = unconstrainedX;
   candidateRoadPosition.z = nextZ;
   sampleRoad(candidateRoadPosition, state.mission.level, aheadRoadSample);
+  aheadRoadSample.routeDistance = (
+    currentRoadSample.routeDistance + moveDistance
+  );
+  applyNavigationRouteSample(aheadRoadSample, unconstrainedX);
   const rawCandidateLateralOffset = (
     unconstrainedX - aheadRoadSample.centerX
   ) * aheadRoadSample.tangentZ;
@@ -1380,15 +1864,19 @@ function updateHud() {
     : `${(travelled / 1000).toFixed(2)} km`;
   remainingDistanceLabel.textContent = `${Math.ceil(remaining)} m`;
   objectiveLabel.textContent = state.journeyStatus === "reached"
-    ? "Village reached"
-    : `Village: ${Math.ceil(remaining)} m remaining`;
+    ? `${navigationState.destinationVillageName} reached`
+    : `${navigationState.destinationVillageName}: ${Math.ceil(remaining)} m remaining`;
   const progressBucket = Math.floor(state.progress * 2);
   if (progressBucket !== state.hudProgressBucket) {
     state.hudProgressBucket = progressBucket;
     journeyProgressFill.style.transform =
       `scaleX(${routeState.missionProgressRatio})`;
   }
-  missionNameLabel.textContent = state.mission.name;
+  if (state.missionHudIndex !== state.missionIndex) {
+    state.missionHudIndex = state.missionIndex;
+    missionNameLabel.textContent =
+      `Deliver ${CARGO_TYPES[state.mission.cargoType].label} to ${navigationState.destinationVillageName}`;
+  }
   missionRewardLabel.textContent = `${state.mission.reward} Coins`;
   missionTimeLabel.textContent = formatMissionTime(state.mission.timeLimit - state.elapsed);
   const stabilityRounded = Math.round(cargoPhysics.stability.stability);
@@ -1502,6 +1990,9 @@ function updateHud() {
       missionMarkers: missionMarkerState,
       proceduralHazards: hazardState,
       proceduralEvents: eventState,
+      navigation: navigationState,
+      routeNetwork: missionRouteNetwork,
+      directionDialogue: directionDialogueState,
     });
   }
 }
@@ -1516,6 +2007,7 @@ function animate() {
     delta,
     renderer.info.render.calls,
   );
+  updateDirectionInteraction(delta);
   if (import.meta.env.DEV && !state.started) updateRoadSamples();
   if (import.meta.env.DEV && !state.started) updateRoadState(0, true);
   if (import.meta.env.DEV && !state.started) updateSurfaceState(0, true);
@@ -1577,6 +2069,7 @@ function replayGame() {
   state.cameraDistance = 0;
   state.movementDebugTimer = 0;
   state.hudProgressBucket = -1;
+  state.missionHudIndex = -1;
   state.stabilityHudBucket = -1;
   state.cargoImpact = 0;
   state.cargoCameraFeedback = 0;
@@ -1623,6 +2116,13 @@ function replayGame() {
 
 playButton.addEventListener("click", startGame);
 replayButton.addEventListener("click", replayGame);
+askDirectionButton.addEventListener("click", askVillagerForDirection);
+window.addEventListener("keydown", (event) => {
+  if (event.code !== "KeyE" || event.repeat) return;
+  if (!navigationState.canAsk) return;
+  event.preventDefault();
+  askVillagerForDirection();
+});
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   updateResponsiveFraming();
@@ -1706,6 +2206,11 @@ window.__bailgadi = {
     missionMarkers: import.meta.env.DEV ? missionMarkerState : undefined,
     proceduralHazards: import.meta.env.DEV ? hazardState : undefined,
     proceduralEvents: import.meta.env.DEV ? eventState : undefined,
+    navigation: import.meta.env.DEV ? navigationState : undefined,
+    routeNetwork: import.meta.env.DEV ? missionRouteNetwork : undefined,
+    directionDialogue: import.meta.env.DEV
+      ? directionDialogueState
+      : undefined,
   }),
   start: startGame,
 };

@@ -14,6 +14,7 @@ import {
   HAZARD_WOODEN_LOG,
   MAX_ROUTE_EVENTS,
   MAX_ROUTE_HAZARDS,
+  MAX_ROUTE_JUNCTIONS,
 } from "./procedural-world.js";
 
 const material = (color, roughness = 0.92) =>
@@ -39,6 +40,7 @@ const EVENT_WATER = new THREE.MeshStandardMaterial({
   transparent: true,
   opacity: 0.72,
 });
+const ROUTE_BRANCH = material(0xb98550);
 const DESTINATION_WOOD = material(0x714526);
 const DESTINATION_CLOTH = material(0xd7a83d);
 const DESTINATION_PLASTER = material(0xd9b271);
@@ -364,6 +366,44 @@ function createEventVisual(type) {
   return createWaterPuddleEvent();
 }
 
+const ROUTE_BRANCH_SEGMENTS = 14;
+const ROUTE_BRANCH_LENGTH = 52;
+const ROUTE_BRANCH_OFFSET = 12;
+const MAX_DIRECTION_VILLAGERS = MAX_ROUTE_JUNCTIONS * 3;
+
+function createDirectionVillager() {
+  const group = new THREE.Group();
+  const body = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.26, 0.36, 1.05, 6),
+    EVENT_CLOTH,
+  ));
+  body.position.y = 1.05;
+  group.add(body);
+  const head = prepareMesh(new THREE.Mesh(
+    new THREE.SphereGeometry(0.21, 7, 5),
+    EVENT_SKIN,
+  ));
+  head.position.y = 1.78;
+  group.add(head);
+  const turban = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.25, 0.26, 0.16, 8),
+    DESTINATION_CLOTH,
+  ));
+  turban.position.y = 1.98;
+  group.add(turban);
+  const pointArm = new THREE.Group();
+  pointArm.position.set(0.3, 1.42, 0);
+  const arm = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.065, 0.08, 0.72, 6),
+    EVENT_SKIN,
+  ));
+  arm.position.y = -0.34;
+  pointArm.add(arm);
+  pointArm.rotation.z = -0.18;
+  group.add(pointArm);
+  return { group, pointArm };
+}
+
 function createDestinationMarker() {
   const marker = new THREE.Group();
   marker.name = "VillageDestination";
@@ -471,6 +511,10 @@ export function createRoadGameplay(scene) {
   hazardGroup.name = "ProceduralRouteHazards";
   const eventGroup = new THREE.Group();
   eventGroup.name = "ProceduralRouteEvents";
+  const routeNetworkGroup = new THREE.Group();
+  routeNetworkGroup.name = "MissionRouteNetwork";
+  const directionVillagerGroup = new THREE.Group();
+  directionVillagerGroup.name = "DirectionVillagers";
   const missionGroup = new THREE.Group();
   missionGroup.name = "MissionRouteMarkers";
   const destinationMarker = createDestinationMarker();
@@ -484,7 +528,13 @@ export function createRoadGameplay(scene) {
   for (let index = 0; index < checkpointMarkers.length; index += 1) {
     missionGroup.add(checkpointMarkers[index]);
   }
-  group.add(missionGroup, hazardGroup, eventGroup);
+  group.add(
+    missionGroup,
+    hazardGroup,
+    eventGroup,
+    routeNetworkGroup,
+    directionVillagerGroup,
+  );
 
   const obstacles = new Array(MAX_ROUTE_HAZARDS);
   for (let index = 0; index < MAX_ROUTE_HAZARDS; index += 1) {
@@ -570,6 +620,55 @@ export function createRoadGameplay(scene) {
     };
   }
   const eventRouteSample = {};
+
+  const junctionVisuals = new Array(MAX_ROUTE_JUNCTIONS);
+  const branchGeometry = new THREE.BoxGeometry(1, 1, 1);
+  for (let index = 0; index < MAX_ROUTE_JUNCTIONS; index += 1) {
+    const junctionGroup = new THREE.Group();
+    junctionGroup.name = `MissionJunction${index + 1}`;
+    const left = new Array(ROUTE_BRANCH_SEGMENTS);
+    const right = new Array(ROUTE_BRANCH_SEGMENTS);
+    for (let segment = 0; segment < ROUTE_BRANCH_SEGMENTS; segment += 1) {
+      const leftRoad = prepareMesh(
+        new THREE.Mesh(branchGeometry, ROUTE_BRANCH),
+        false,
+      );
+      const rightRoad = prepareMesh(
+        new THREE.Mesh(branchGeometry, ROUTE_BRANCH),
+        false,
+      );
+      leftRoad.visible = false;
+      rightRoad.visible = false;
+      junctionGroup.add(leftRoad, rightRoad);
+      left[segment] = leftRoad;
+      right[segment] = rightRoad;
+    }
+    junctionGroup.visible = false;
+    routeNetworkGroup.add(junctionGroup);
+    junctionVisuals[index] = { group: junctionGroup, left, right };
+  }
+
+  const directionVillagers = new Array(MAX_DIRECTION_VILLAGERS);
+  for (let index = 0; index < directionVillagers.length; index += 1) {
+    const created = createDirectionVillager();
+    created.group.name = `DirectionVillager${index + 1}`;
+    created.group.visible = false;
+    directionVillagerGroup.add(created.group);
+    directionVillagers[index] = {
+      id: `direction-villager-${index}`,
+      junctionId: "None",
+      routeId: "None",
+      routeDistance: 0,
+      isWrongRouteHelper: false,
+      active: false,
+      x: 10000,
+      z: 10000,
+      group: created.group,
+      pointArm: created.pointArm,
+    };
+  }
+  const junctionSampleA = {};
+  const junctionSampleB = {};
   scene.add(group);
 
   function configureHazards(count, routeSampler, difficulty) {
@@ -775,6 +874,226 @@ export function createRoadGameplay(scene) {
     }
   }
 
+  function branchOffsetAt(routeDistance, junctionDistance, direction) {
+    const progress = THREE.MathUtils.clamp(
+      (routeDistance - (junctionDistance - 6)) / ROUTE_BRANCH_LENGTH,
+      0,
+      1,
+    );
+    const side = direction === "LEFT" ? 1 : -1;
+    return Math.sin(progress * Math.PI) * ROUTE_BRANCH_OFFSET * side;
+  }
+
+  function configureBranch(
+    meshes,
+    descriptor,
+    direction,
+    routeSampler,
+    difficulty,
+    visible,
+  ) {
+    for (let segment = 0; segment < meshes.length; segment += 1) {
+      const mesh = meshes[segment];
+      mesh.visible = visible;
+      if (!visible) continue;
+      const startDistance = (
+        descriptor.routeDistance - 6
+        + (segment / ROUTE_BRANCH_SEGMENTS) * ROUTE_BRANCH_LENGTH
+      );
+      const endDistance = (
+        descriptor.routeDistance - 6
+        + ((segment + 1) / ROUTE_BRANCH_SEGMENTS) * ROUTE_BRANCH_LENGTH
+      );
+      routeSampler(startDistance, difficulty, junctionSampleA);
+      routeSampler(endDistance, difficulty, junctionSampleB);
+      const startOffset = branchOffsetAt(
+        startDistance,
+        descriptor.routeDistance,
+        direction,
+      );
+      const endOffset = branchOffsetAt(
+        endDistance,
+        descriptor.routeDistance,
+        direction,
+      );
+      const startX = (
+        junctionSampleA.centerX + junctionSampleA.normalX * startOffset
+      );
+      const startZ = (
+        junctionSampleA.centerZ + junctionSampleA.normalZ * startOffset
+      );
+      const endX = (
+        junctionSampleB.centerX + junctionSampleB.normalX * endOffset
+      );
+      const endZ = (
+        junctionSampleB.centerZ + junctionSampleB.normalZ * endOffset
+      );
+      const deltaX = endX - startX;
+      const deltaZ = endZ - startZ;
+      mesh.position.set(
+        (startX + endX) * 0.5,
+        (junctionSampleA.centerY + junctionSampleB.centerY) * 0.5 + 0.025,
+        (startZ + endZ) * 0.5,
+      );
+      mesh.rotation.set(0, Math.atan2(deltaX, deltaZ), 0);
+      mesh.scale.set(
+        Math.max(5.2, junctionSampleA.width * 0.38),
+        0.045,
+        Math.hypot(deltaX, deltaZ) + 0.55,
+      );
+    }
+  }
+
+  function placeDirectionVillager(
+    villager,
+    descriptor,
+    routeId,
+    direction,
+    routeDistance,
+    isWrongRouteHelper,
+    routeSampler,
+    difficulty,
+  ) {
+    routeSampler(routeDistance, difficulty, junctionSampleA);
+    const branchOffset = direction === "STRAIGHT"
+      ? 0
+      : branchOffsetAt(routeDistance, descriptor.routeDistance, direction);
+    const side = direction === "LEFT" ? 1 : -1;
+    const roadsideOffset = isWrongRouteHelper
+      ? branchOffset + side * 3.3
+      : -(junctionSampleA.width * 0.5 + 2.5);
+    villager.junctionId = descriptor.id;
+    villager.routeId = routeId;
+    villager.routeDistance = routeDistance;
+    villager.isWrongRouteHelper = isWrongRouteHelper;
+    villager.active = true;
+    villager.x = junctionSampleA.centerX
+      + junctionSampleA.normalX * roadsideOffset;
+    villager.z = junctionSampleA.centerZ
+      + junctionSampleA.normalZ * roadsideOffset;
+    villager.group.position.set(
+      villager.x,
+      junctionSampleA.centerY + 0.01,
+      villager.z,
+    );
+    villager.group.rotation.set(
+      0,
+      Math.atan2(junctionSampleA.tangentX, junctionSampleA.tangentZ)
+        + (side > 0 ? -Math.PI * 0.5 : Math.PI * 0.5),
+      0,
+    );
+    villager.group.visible = true;
+    villager.pointArm.rotation.set(0, 0, -0.18);
+  }
+
+  function configureRouteNetwork(
+    junctions,
+    count,
+    routeSampler,
+    difficulty,
+  ) {
+    let villagerIndex = 0;
+    for (let index = 0; index < junctionVisuals.length; index += 1) {
+      const descriptor = junctions[index];
+      const visual = junctionVisuals[index];
+      const active = index < count && descriptor.active;
+      visual.group.visible = active;
+      let hasLeft = false;
+      let hasRight = false;
+      if (active) {
+        for (
+          let routeIndex = 0;
+          routeIndex < descriptor.outgoingRoutes.length;
+          routeIndex += 1
+        ) {
+          const route = descriptor.outgoingRoutes[routeIndex];
+          if (route.direction === "LEFT") hasLeft = true;
+          else if (route.direction === "RIGHT") hasRight = true;
+        }
+      }
+      configureBranch(
+        visual.left,
+        descriptor,
+        "LEFT",
+        routeSampler,
+        difficulty,
+        active && hasLeft,
+      );
+      configureBranch(
+        visual.right,
+        descriptor,
+        "RIGHT",
+        routeSampler,
+        difficulty,
+        active && hasRight,
+      );
+      if (!active) continue;
+
+      placeDirectionVillager(
+        directionVillagers[villagerIndex],
+        descriptor,
+        descriptor.incomingRouteId,
+        "STRAIGHT",
+        descriptor.villagerSpawnRouteDistance,
+        false,
+        routeSampler,
+        difficulty,
+      );
+      villagerIndex += 1;
+
+      for (
+        let routeIndex = 0;
+        routeIndex < descriptor.outgoingRoutes.length;
+        routeIndex += 1
+      ) {
+        const route = descriptor.outgoingRoutes[routeIndex];
+        if (route.id === descriptor.correctOutgoingRouteId) continue;
+        placeDirectionVillager(
+          directionVillagers[villagerIndex],
+          descriptor,
+          route.id,
+          route.direction,
+          descriptor.wrongVillagerSpawnRouteDistance,
+          true,
+          routeSampler,
+          difficulty,
+        );
+        villagerIndex += 1;
+      }
+    }
+    for (
+      let index = villagerIndex;
+      index < directionVillagers.length;
+      index += 1
+    ) {
+      const villager = directionVillagers[index];
+      villager.active = false;
+      villager.group.visible = false;
+      villager.x = 10000;
+      villager.z = 10000;
+    }
+  }
+
+  function setVillagerGuidance(villagerId, direction, active) {
+    for (let index = 0; index < directionVillagers.length; index += 1) {
+      const villager = directionVillagers[index];
+      const selected = active && villager.id === villagerId;
+      villager.pointArm.rotation.z = selected
+        ? direction === "LEFT" ? 1.2 : direction === "RIGHT" ? -1.2 : -1.55
+        : -0.18;
+    }
+  }
+
+  function resetRouteNetwork() {
+    for (let index = 0; index < junctionVisuals.length; index += 1) {
+      junctionVisuals[index].group.visible = false;
+    }
+    for (let index = 0; index < directionVillagers.length; index += 1) {
+      directionVillagers[index].active = false;
+      directionVillagers[index].group.visible = false;
+    }
+  }
+
   function placeMarker(marker, sample, yOffset, widthScale = 1) {
     marker.position.set(
       sample.centerX,
@@ -790,8 +1109,9 @@ export function createRoadGameplay(scene) {
     marker.visible = true;
   }
 
-  function placeDestination(sample) {
+  function placeDestination(sample, villageName = "Village") {
     placeMarker(destinationMarker, sample, 0.012);
+    destinationMarker.name = `Destination-${villageName}`;
   }
 
   function placeCheckpoint(index, sample) {
@@ -892,6 +1212,7 @@ export function createRoadGameplay(scene) {
   function reset() {
     resetHazards();
     resetEvents();
+    resetRouteNetwork();
     resetMissionMarkers();
   }
 
@@ -900,8 +1221,11 @@ export function createRoadGameplay(scene) {
     missionGroup,
     hazardGroup,
     eventGroup,
+    routeNetworkGroup,
+    directionVillagerGroup,
     hazards: obstacles,
     events,
+    directionVillagers,
     destinationMarker,
     checkpointMarkers,
     checkImpact,
@@ -912,8 +1236,11 @@ export function createRoadGameplay(scene) {
     resetMissionMarkers,
     configureHazards,
     configureEvents,
+    configureRouteNetwork,
+    setVillagerGuidance,
     resetHazards,
     resetEvents,
+    resetRouteNetwork,
     reset,
   };
 }

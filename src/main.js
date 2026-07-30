@@ -751,7 +751,11 @@ function applyNavigationRouteSample(sample, worldX) {
   sample.tangentZ = tangentZ / tangentLength;
   sample.normalX = sample.tangentZ;
   sample.normalZ = -sample.tangentX;
-  sample.width = Math.max(5.2, sample.width * 0.38);
+  const branchSeparation = Math.sin(smoothProgress * Math.PI);
+  sample.width = Math.max(
+    5.8,
+    sample.width * THREE.MathUtils.lerp(1, 0.42, branchSeparation),
+  );
   if (typeof worldX === "number") {
     const signedOffset = (
       (worldX - sample.centerX) * sample.tangentZ

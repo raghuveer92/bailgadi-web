@@ -151,6 +151,7 @@ export function createRopeReinAnimation(root, parts) {
     inputSource: "manual",
     inputDirection: "idle",
     driverInputState: "IDLE",
+    guidanceAmount: 0,
     suspension: { y: 0, roll: 0, pitch: 0 },
   };
 }
@@ -283,7 +284,8 @@ export function updateRopeReinAnimation(
     0.24
     + speedRatio * 0.18
     + Math.max(drivePull, brakePull) * 0.38
-    + Math.abs(system.inputAmount) * 0.13;
+    + Math.abs(system.inputAmount) * 0.13
+    + Math.abs(system.guidanceAmount) * 0.2;
   system.ropeTension = damp(
     system.ropeTension,
     THREE.MathUtils.clamp(ropeTarget, 0, 1),
@@ -303,7 +305,9 @@ export function updateRopeReinAnimation(
     + suspensionPitch * 0.32;
   system.reins.forEach((rein, index) => {
     const arm = rein.startAnchor.parent;
-    arm.rotation.x = system.inputAmount * 0.075 + armRoadMotion;
+    const directionalPull = system.guidanceAmount
+      * (index === 0 ? 0.085 : -0.085);
+    arm.rotation.x = system.inputAmount * 0.075 + armRoadMotion + directionalPull;
     arm.rotation.z =
       (index === 0 ? -1 : 1)
       * (Math.abs(system.inputAmount) * 0.018 + suspensionRoll * 0.22);
@@ -331,4 +335,5 @@ export function resetRopeReinAnimation(system) {
   system.inputHold = 0;
   system.inputDirection = "idle";
   system.driverInputState = "IDLE";
+  system.guidanceAmount = 0;
 }

@@ -13,11 +13,16 @@ function seeded(seed) {
 
 export function createWorld(scene) {
   scene.background = new THREE.Color(0xa4cde3);
-  scene.fog = new THREE.Fog(0xa4cde3, 92, 300);
+  scene.fog = new THREE.Fog(0xa4cde3, 82, 142);
+  const requestedSeed = Number.parseInt(
+    new URLSearchParams(window.location.search).get("seed") || "",
+    10,
+  );
 
   const worldGenerator = new WorldGenerator(scene, {
-    activeChunkCount: 7,
-    poolSize: 9,
+    activeChunkCount: 5,
+    poolSize: 7,
+    seed: Number.isFinite(requestedSeed) ? requestedSeed : undefined,
   });
   const random = seeded(worldGenerator.seed ^ 0x5f3759df);
   const villageLife = createVillageLife(scene, { random, windTargets: [] });
@@ -51,6 +56,9 @@ export function createWorld(scene) {
     ),
     getRoutePosition: (position, difficulty = 1, target = {}) => (
       worldGenerator.getRoutePosition(position, difficulty, target)
+    ),
+    checkWaterAhead: (position, heading, lookAhead, target) => (
+      worldGenerator.checkWaterAhead(position, heading, lookAhead, target)
     ),
     sampleRouteDistance: (routeDistance, difficulty = 1, target = {}) => (
       worldGenerator.sampleRouteDistance(routeDistance, difficulty, target)
@@ -104,6 +112,15 @@ export function createWorld(scene) {
       destinationVillageName,
       targetJunctions,
       targetMissionRoute,
+    ),
+    configureJunctionRoads: (
+      junctions,
+      count,
+      difficulty,
+    ) => worldGenerator.configureJunctionRoads(
+      junctions,
+      count,
+      difficulty,
     ),
     generateVillage: (
       routeDistance,

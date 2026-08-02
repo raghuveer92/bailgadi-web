@@ -491,6 +491,8 @@ export function createBullockCart() {
     cargoHeadTurn: 0,
     cargoDriverWorry: 0,
     cargoReinPull: 0,
+    bullGuidanceTurn: 0,
+    bullGuidanceWaiting: false,
   };
 
   const bulls = new THREE.Group();
@@ -684,6 +686,10 @@ export function animateCart(
         * (0.04 + parts.movementBlend * 0.025)
         * parts.walkBlend
       + Math.sin(elapsed * 1.2 + bullData.phaseOffset) * 0.012;
+    bullData.head.rotation.y = parts.bullGuidanceTurn * 0.22
+      + (parts.bullGuidanceWaiting
+        ? Math.sin(elapsed * 0.82 + bullData.phaseOffset) * 0.08
+        : 0);
     bullData.head.rotation.z =
       Math.sin(phase + bullData.phaseOffset) * 0.018 * parts.walkBlend;
     bullData.ears.forEach((ear, index) => {
@@ -794,7 +800,7 @@ export function animateCart(
     -parts.driverReaction * 0.28
     + Math.sin(elapsed * 2.2) * 0.014 * parts.movementBlend
     + parts.cargoDriverWorry * 0.035;
-  parts.driverHead.rotation.y = parts.cargoHeadTurn;
+  parts.driverHead.rotation.y = parts.cargoHeadTurn + parts.bullGuidanceTurn * 0.12;
   parts.driverHead.rotation.z =
     -parts.suspensionRoll * 0.4
     + Math.sin(elapsed * 1.75 + 0.6) * 0.012 * parts.movementBlend
@@ -809,9 +815,15 @@ export function animateCart(
     suspensionRoll: parts.suspensionRoll,
     suspensionPitch: parts.suspensionPitch,
   });
+  parts.ropeRein.guidanceAmount = parts.bullGuidanceTurn;
   parts.driverArms.forEach((arm) => {
     arm.rotation.x += parts.cargoReinPull;
   });
+}
+
+export function setCartGuidanceFeedback(parts, guidanceAmount, waiting) {
+  parts.bullGuidanceTurn = THREE.MathUtils.clamp(guidanceAmount, -1, 1);
+  parts.bullGuidanceWaiting = waiting === true;
 }
 
 export function reactDriver(parts, command, source = "input") {
@@ -828,6 +840,8 @@ export function triggerCartBump(parts, intensity = 1, side = 0) {
   parts.cargoHeadTurn = 0;
   parts.cargoDriverWorry = 0;
   parts.cargoReinPull = 0;
+  parts.bullGuidanceTurn = 0;
+  parts.bullGuidanceWaiting = false;
 }
 
 export function resetCartAnimation(parts) {
@@ -854,6 +868,7 @@ export function resetCartAnimation(parts) {
     bull.kneeBend.fill(0);
     bull.upperBody.position.y = 0;
     bull.head.rotation.x = -0.08;
+    bull.head.rotation.y = 0;
     bull.head.rotation.z = 0;
     bull.legs.forEach((leg) => {
       leg.root.position.y = leg.baseY;

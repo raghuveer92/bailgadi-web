@@ -96,13 +96,31 @@ export class Controls {
   }
 
   increaseSpeedLevel(source = "input") {
+    if (!this.enabled) return false;
     if (this.reverseActive) {
       this.reverseActive = false;
-      this.speedLevel = 0;
-      this.notifyDriveChange("brake", source, -1);
+      this.speedLevel = 1;
+      this.onSpeedLevelChange({
+        direction: "forward",
+        source,
+        previousLevel: -1,
+        level: this.speedLevel,
+        mode: SPEED_MODES[this.speedLevel],
+        targetSpeed: SPEED_TARGETS[this.speedLevel],
+      });
       return true;
     }
-    if (!this.enabled || this.speedLevel >= SPEED_MODES.length - 1) return false;
+    if (this.speedLevel >= SPEED_MODES.length - 1) {
+      this.onSpeedLevelChange({
+        direction: "forward",
+        source,
+        previousLevel: this.speedLevel,
+        level: this.speedLevel,
+        mode: SPEED_MODES[this.speedLevel],
+        targetSpeed: SPEED_TARGETS[this.speedLevel],
+      });
+      return true;
+    }
     const previousLevel = this.speedLevel;
     this.speedLevel += 1;
     this.onSpeedLevelChange({

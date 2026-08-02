@@ -31,9 +31,10 @@
           <span class="brand-mark">ब</span>
           <span><strong>BAILGADI</strong><small>VILLAGE ROAD</small></span>
         </div>
+        <button id="menu-button" type="button" aria-label="Open village information">VILLAGES</button>
         <div class="stats">
           <div><small>DISTANCE</small><strong id="distance">0 m</strong></div>
-          <div><small>VILLAGE</small><strong id="remaining-distance">500 m</strong></div>
+          <div><small id="destination-guidance-label">VILLAGE</small><strong id="remaining-distance">500 m</strong></div>
           <div><small>SPEED · <span id="speed-mode">STOPPED</span></small><strong id="speed">0.0 km/h</strong></div>
         </div>
         <div class="objective-panel">
@@ -131,11 +132,18 @@
       </div>
 
       <div id="checkpoint-message" class="checkpoint-message hidden" role="status"></div>
+      <aside id="village-welcome" class="village-welcome hidden" role="status" aria-live="polite">
+        <small id="village-welcome-kicker">WELCOME TO</small>
+        <strong id="village-welcome-name">Rampur</strong>
+        <span id="village-welcome-known">Known for Wheat Farming</span>
+        <span id="village-welcome-reputation">Reputation 0%</span>
+      </aside>
       <button id="ask-direction-button" class="ask-direction hidden" type="button">
         <span>Ask</span><kbd>E</kbd>
       </button>
       <button id="delivery-interaction-button" class="ask-direction hidden" type="button">
-        <span>Deliver Goods</span><kbd>E</kbd>
+        <span class="delivery-keyboard-label">Press E to Deliver</span>
+        <span class="delivery-touch-label">Deliver Cargo</span>
       </button>
       <div id="direction-dialogue" class="direction-dialogue hidden" role="status" aria-live="polite">
         <p id="direction-driver-line"></p>
@@ -160,11 +168,35 @@
         </div>
       </div>
 
+      <section id="pause-menu" class="overlay is-hidden" aria-labelledby="village-info-title">
+        <div class="start-card village-info-card">
+          <p class="eyebrow">Journey paused</p>
+          <h2 id="village-info-title">Village Information</h2>
+          <div class="village-summary">
+            <div><span>Discovered</span><strong id="villages-discovered">0 / 6</strong></div>
+            <div><span>Deliveries</span><strong id="villages-deliveries">0</strong></div>
+            <div><span>Best Reward</span><strong id="villages-best-reward">0</strong></div>
+            <div><span>Completion</span><strong id="villages-completion">0%</strong></div>
+          </div>
+          <div id="village-info-list" class="village-info-list">
+            <p class="village-info-empty">No villages discovered yet.</p>
+          </div>
+          <button id="resume-button" type="button">RESUME <span>→</span></button>
+        </div>
+      </section>
+
       <section id="finish-screen" class="overlay is-hidden" aria-labelledby="finish-title">
         <div class="start-card finish-card">
           <p class="eyebrow">Journey complete</p>
           <h2 id="finish-title">Village Reached!</h2>
           <p class="finish-copy">The Bailgadi made it safely home.</p>
+          <dl id="finish-details" class="finish-details hidden">
+            <div><dt>Village</dt><dd id="finish-village">—</dd></div>
+            <div><dt>Reward</dt><dd id="finish-reward">—</dd></div>
+            <div><dt>Time</dt><dd id="finish-time">—</dd></div>
+            <div><dt>Cargo condition</dt><dd id="finish-cargo-condition">—</dd></div>
+            <div><dt>Reputation</dt><dd id="finish-reputation">—</dd></div>
+          </dl>
           <button id="replay-button" type="button"><span id="replay-label">NEXT MISSION</span> <span>→</span></button>
         </div>
       </section>

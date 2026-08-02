@@ -15,6 +15,11 @@ import {
   MAX_ROUTE_EVENTS,
   MAX_ROUTE_HAZARDS,
   MAX_ROUTE_JUNCTIONS,
+  ROUTE_FORK_APPROACH_DISTANCE,
+  applyRouteSegmentToSample,
+  routeSegmentOffsetAt,
+  routeSegmentOffsetSlopeAt,
+  routeSegmentWidthAt,
 } from "./procedural-world.js";
 
 const material = (color, roughness = 0.92) =>
@@ -41,6 +46,10 @@ const EVENT_WATER = new THREE.MeshStandardMaterial({
   opacity: 0.72,
 });
 const ROUTE_BRANCH = material(0xb98550);
+ROUTE_BRANCH.polygonOffset = true;
+ROUTE_BRANCH.polygonOffsetFactor = -1;
+ROUTE_BRANCH.polygonOffsetUnits = -2;
+const ROUTE_TRACK = material(0x9b6b40, 0.96);
 const DESTINATION_WOOD = material(0x714526);
 const DESTINATION_CLOTH = material(0xd7a83d);
 const DESTINATION_PLASTER = material(0xd9b271);
@@ -49,6 +58,22 @@ const VILLAGE_BLUE = material(0x74a5a1);
 const VILLAGE_ROOF = material(0xa65334);
 const VILLAGE_GROUND = material(0xb98b55);
 const VILLAGE_DARK = material(0x3b3027);
+
+function setPropMetadata(
+  object,
+  category,
+  placementContext,
+  collidable = false,
+  damaging = false,
+) {
+  object.userData.propMetadata = {
+    category,
+    collidable,
+    damaging,
+    placementContext,
+  };
+  return object;
+}
 
 function prepareMesh(mesh, castShadow = true) {
   mesh.castShadow = castShadow;
@@ -329,6 +354,7 @@ function createRoadRepairEvent() {
       group.add(post);
     }
   }
+  setPropMetadata(group, "hazard", "event", true, true);
   return group;
 }
 
@@ -370,10 +396,13 @@ function createEventVisual(type) {
   return createWaterPuddleEvent();
 }
 
-const ROUTE_BRANCH_SEGMENTS = 14;
-const ROUTE_BRANCH_LENGTH = 52;
-const ROUTE_BRANCH_OFFSET = 12;
-const JUNCTION_BLEND_LENGTH = 18;
+const JUNCTION_SURFACE_START = -ROUTE_FORK_APPROACH_DISTANCE;
+const JUNCTION_SURFACE_SAMPLE_SPACING = 4;
+const JUNCTION_SURFACE_MAX_VERTICES = 4096;
+const JUNCTION_SURFACE_LIFT = 0.012;
+const JUNCTION_TRACK_START = 24;
+const JUNCTION_TRACK_SPACING = 5.5;
+const MAX_JUNCTION_TRACKS = 256;
 const MAX_DIRECTION_VILLAGERS = MAX_ROUTE_JUNCTIONS * 3;
 
 function createDirectionVillager() {
@@ -412,26 +441,37 @@ function createDirectionVillager() {
 function createDestinationMarker() {
   const marker = new THREE.Group();
   marker.name = "VillageDeliveryPoint";
+  const glowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xf4d35e,
+    transparent: true,
+    opacity: 0.58,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
   const pad = prepareMesh(new THREE.Mesh(
     new THREE.RingGeometry(1.7, 2.25, 24),
-    DESTINATION_CLOTH,
+    glowMaterial,
   ), false);
   pad.rotation.x = -Math.PI / 2;
   pad.position.y = 0.07;
   marker.add(pad);
-  const post = prepareMesh(new THREE.Mesh(
-    new THREE.CylinderGeometry(0.11, 0.15, 3.8, 7),
+  const glow = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(1.42, 1.9, 3.8, 24, 1, true),
+    glowMaterial.clone(),
+  ), false);
+  glow.position.y = 1.9;
+  marker.add(glow);
+  const crate = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(1.15, 0.9, 1.05),
     DESTINATION_WOOD,
   ));
-  post.position.set(2.15, 1.9, 0);
-  marker.add(post);
-  const flag = prepareMesh(new THREE.Mesh(
-    new THREE.ConeGeometry(0.65, 1.45, 3),
-    DESTINATION_CLOTH,
-  ));
-  flag.rotation.z = -Math.PI / 2;
-  flag.position.set(1.52, 3.25, 0);
-  marker.add(flag);
+  crate.position.y = 2.65;
+  crate.rotation.set(0.12, Math.PI / 4, -0.08);
+  marker.add(crate);
+  marker.userData.pad = pad;
+  marker.userData.glow = glow;
+  marker.userData.crate = crate;
+  marker.userData.baseY = 0;
   marker.visible = false;
   return marker;
 }
@@ -570,6 +610,7 @@ function createVillageEntrance() {
   sign.scale.set(10.5, 2.2, 1);
   sign.center.set(0.5, 0.5);
   group.add(beam, sign);
+  setPropMetadata(group, "constructed", "village", false, false);
   return { group, sign, texture: null };
 }
 
@@ -690,6 +731,7 @@ function createAmbientProp(type) {
     group.add(post, light);
   }
   group.name = `VillageProp-${type}`;
+  setPropMetadata(group, "constructed", "village", false, false);
   return { group, type };
 }
 
@@ -713,6 +755,87 @@ function updateEntranceLabel(entrance, label) {
   entrance.texture.colorSpace = THREE.SRGBColorSpace;
   entrance.sign.material.map = entrance.texture;
   entrance.sign.material.needsUpdate = true;
+}
+
+function createVillageWell() {
+  const group = new THREE.Group();
+  const base = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(1.35, 1.5, 1.05, 14),
+    ROCK_LIGHT,
+  ));
+  base.position.y = 0.52;
+  const rim = prepareMesh(new THREE.Mesh(
+    new THREE.TorusGeometry(1.25, 0.16, 7, 18),
+    ROCK,
+  ));
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = 1.05;
+  group.add(base, rim);
+  return group;
+}
+
+function createVillageGuidanceSign() {
+  const group = new THREE.Group();
+  const post = prepareMesh(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.09, 0.12, 2.8, 7),
+    DESTINATION_WOOD,
+  ));
+  post.position.y = 1.4;
+  const board = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(3.6, 1.05, 0.16),
+    DESTINATION_WOOD,
+  ));
+  board.position.y = 2.45;
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xffffff }));
+  label.position.set(0, 2.45, -0.1);
+  label.scale.set(3.25, 0.82, 1);
+  group.add(post, board, label);
+  setPropMetadata(group, "constructed", "village", false, false);
+  return { group, label, texture: null };
+}
+
+function createConnectedFenceSection() {
+  const group = new THREE.Group();
+  for (let railIndex = 0; railIndex < 2; railIndex += 1) {
+    const rail = prepareMesh(new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.16, 4.2),
+      DESTINATION_WOOD,
+    ));
+    rail.position.y = 0.55 + railIndex * 0.58;
+    group.add(rail);
+  }
+  for (let end = -1; end <= 1; end += 2) {
+    const post = prepareMesh(new THREE.Mesh(
+      new THREE.BoxGeometry(0.24, 1.45, 0.24),
+      DESTINATION_WOOD,
+    ));
+    post.position.set(0, 0.72, end * 2.05);
+    group.add(post);
+  }
+  setPropMetadata(group, "constructed", "village", false, false);
+  return group;
+}
+
+function updateGuidanceSignLabel(sign, text) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 640;
+  canvas.height = 160;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#6f4528";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = "#e3b34c";
+  context.lineWidth = 10;
+  context.strokeRect(7, 7, canvas.width - 14, canvas.height - 14);
+  context.fillStyle = "#fff4d2";
+  context.font = "700 48px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(text, canvas.width / 2, canvas.height / 2);
+  if (sign.texture) sign.texture.dispose();
+  sign.texture = new THREE.CanvasTexture(canvas);
+  sign.texture.colorSpace = THREE.SRGBColorSpace;
+  sign.label.material.map = sign.texture;
+  sign.label.material.needsUpdate = true;
 }
 
 function createMissionVillage() {
@@ -755,10 +878,7 @@ function createMissionVillage() {
     return tree;
   });
   const fences = Array.from({ length: 14 }, () => {
-    const fence = prepareMesh(new THREE.Mesh(
-      new THREE.BoxGeometry(4.2, 0.65, 0.18),
-      DESTINATION_WOOD,
-    ));
+    const fence = createConnectedFenceSection();
     fence.visible = false;
     group.add(fence);
     return fence;
@@ -772,19 +892,7 @@ function createMissionVillage() {
     return prop;
   });
 
-  const well = new THREE.Group();
-  const wellBase = prepareMesh(new THREE.Mesh(
-    new THREE.CylinderGeometry(1.35, 1.5, 1.05, 14),
-    ROCK_LIGHT,
-  ));
-  wellBase.position.y = 0.52;
-  const wellRim = prepareMesh(new THREE.Mesh(
-    new THREE.TorusGeometry(1.25, 0.16, 7, 18),
-    ROCK,
-  ));
-  wellRim.rotation.x = Math.PI / 2;
-  wellRim.position.y = 1.05;
-  well.add(wellBase, wellRim);
+  const well = createVillageWell();
   group.add(well);
 
   const landmark = new THREE.Group();
@@ -802,12 +910,38 @@ function createMissionVillage() {
   temple.add(templeBase, templeTower);
   const banyan = createVillageTree();
   banyan.scale.set(2.1, 1.8, 2.1);
-  landmark.add(temple, banyan);
+  const landmarkWell = createVillageWell();
+  landmarkWell.scale.setScalar(1.15);
+  const grainMarket = new THREE.Group();
+  const grainMarketBuilding = createVillageHouse();
+  grainMarketBuilding.group.scale.set(1.15, 1, 1.15);
+  const grainSacks = createAmbientProp("grain-sacks").group;
+  grainSacks.position.set(3.2, 0, 0.8);
+  grainMarket.add(grainMarketBuilding.group, grainSacks);
+  const panchayat = new THREE.Group();
+  const panchayatBuilding = createVillageHouse();
+  panchayatBuilding.body.material = VILLAGE_BLUE;
+  panchayatBuilding.group.scale.set(1.2, 1.08, 1.2);
+  const panchayatBeam = prepareMesh(new THREE.Mesh(
+    new THREE.BoxGeometry(4.2, 0.28, 0.2),
+    DESTINATION_WOOD,
+  ));
+  panchayatBeam.position.set(0, 3.2, 2.52);
+  panchayat.add(panchayatBuilding.group, panchayatBeam);
+  landmark.add(temple, banyan, landmarkWell, grainMarket, panchayat);
   group.add(landmark);
 
   const deliveryBuilding = createVillageHouse();
   deliveryBuilding.group.scale.set(1.25, 1.08, 1.3);
   group.add(deliveryBuilding.group);
+  const guidanceSigns = Array.from(
+    { length: 3 },
+    () => createVillageGuidanceSign(),
+  );
+  for (let index = 0; index < guidanceSigns.length; index += 1) {
+    guidanceSigns[index].group.visible = false;
+    group.add(guidanceSigns[index].group);
+  }
   return {
     group,
     entrance,
@@ -822,7 +956,11 @@ function createMissionVillage() {
     landmark,
     temple,
     banyan,
+    landmarkWell,
+    grainMarket,
+    panchayat,
     deliveryBuilding,
+    guidanceSigns,
     descriptor: null,
     activeVillagerCount: 0,
     activeAnimalCount: 0,
@@ -879,6 +1017,9 @@ export function createRoadGameplay(scene) {
     activeVillageName: "None",
     activeVillagerCount: 0,
     activeAnimalCount: 0,
+    landmarkType: "None",
+    landmarkCount: 0,
+    guidanceSignCount: 0,
   };
   const destinationMarker = createDestinationMarker();
   const checkpointMarkers = [
@@ -934,9 +1075,14 @@ export function createRoadGameplay(scene) {
       severity: 0,
       roughness: 0,
       hit: false,
+      category: "hazard",
+      collidable: true,
+      damaging: true,
+      placementContext: "roadside",
       group: obstacleRoot,
       variants,
     };
+    setPropMetadata(obstacleRoot, "hazard", "roadside", true, true);
   }
   const hazardRouteSample = {};
 
@@ -963,6 +1109,10 @@ export function createRoadGameplay(scene) {
         x: 10000,
         z: 10000,
         radius: 0,
+        category: "hazard",
+        collidable: true,
+        damaging: true,
+        placementContext: "event",
       };
     }
     eventGroup.add(eventRoot);
@@ -982,43 +1132,62 @@ export function createRoadGameplay(scene) {
       variants,
       collisionParts,
     };
+    setPropMetadata(eventRoot, "hazard", "event", true, true);
   }
   const eventRouteSample = {};
 
   const junctionVisuals = new Array(MAX_ROUTE_JUNCTIONS);
-  const branchGeometry = new THREE.PlaneGeometry(1, 1);
-  branchGeometry.rotateX(-Math.PI / 2);
-  const junctionGeometry = new THREE.CircleGeometry(1, 32);
-  junctionGeometry.rotateX(-Math.PI / 2);
+  const junctionTrackGeometry = new THREE.BoxGeometry(0.2, 0.025, 4.4);
+  const junctionTransform = new THREE.Object3D();
+  const junctionDebug = {
+    activeJunctions: 0,
+    sharedSurfaceCount: 0,
+    surfaceVertexCounts: new Array(MAX_ROUTE_JUNCTIONS).fill(0),
+    branchTrackCounts: new Array(MAX_ROUTE_JUNCTIONS).fill(0),
+  };
   for (let index = 0; index < MAX_ROUTE_JUNCTIONS; index += 1) {
     const junctionGroup = new THREE.Group();
     junctionGroup.name = `MissionJunction${index + 1}`;
-    const left = new Array(ROUTE_BRANCH_SEGMENTS);
-    const right = new Array(ROUTE_BRANCH_SEGMENTS);
-    const blend = prepareMesh(
-      new THREE.Mesh(junctionGeometry, ROUTE_BRANCH),
+    const positions = new Float32Array(JUNCTION_SURFACE_MAX_VERTICES * 3);
+    const normals = new Float32Array(JUNCTION_SURFACE_MAX_VERTICES * 3);
+    for (let vertex = 0; vertex < JUNCTION_SURFACE_MAX_VERTICES; vertex += 1) {
+      normals[vertex * 3 + 1] = 1;
+    }
+    const surfaceGeometry = new THREE.BufferGeometry();
+    surfaceGeometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage),
+    );
+    surfaceGeometry.setAttribute(
+      "normal",
+      new THREE.BufferAttribute(normals, 3),
+    );
+    surfaceGeometry.setDrawRange(0, 0);
+    const surface = prepareMesh(
+      new THREE.Mesh(surfaceGeometry, ROUTE_BRANCH),
       false,
     );
-    blend.visible = false;
-    junctionGroup.add(blend);
-    for (let segment = 0; segment < ROUTE_BRANCH_SEGMENTS; segment += 1) {
-      const leftRoad = prepareMesh(
-        new THREE.Mesh(branchGeometry, ROUTE_BRANCH),
-        false,
-      );
-      const rightRoad = prepareMesh(
-        new THREE.Mesh(branchGeometry, ROUTE_BRANCH),
-        false,
-      );
-      leftRoad.visible = false;
-      rightRoad.visible = false;
-      junctionGroup.add(leftRoad, rightRoad);
-      left[segment] = leftRoad;
-      right[segment] = rightRoad;
-    }
+    surface.name = `SharedJunctionSurface${index + 1}`;
+    surface.frustumCulled = false;
+    surface.visible = false;
+    const tracks = new THREE.InstancedMesh(
+      junctionTrackGeometry,
+      ROUTE_TRACK,
+      MAX_JUNCTION_TRACKS,
+    );
+    tracks.name = `JunctionBranchTracks${index + 1}`;
+    tracks.count = 0;
+    tracks.frustumCulled = false;
+    tracks.receiveShadow = true;
+    junctionGroup.add(surface, tracks);
     junctionGroup.visible = false;
     routeNetworkGroup.add(junctionGroup);
-    junctionVisuals[index] = { group: junctionGroup, blend, left, right };
+    junctionVisuals[index] = {
+      group: junctionGroup,
+      surface,
+      positions,
+      tracks,
+    };
   }
 
   const directionVillagers = new Array(MAX_DIRECTION_VILLAGERS);
@@ -1253,85 +1422,261 @@ export function createRoadGameplay(scene) {
     }
   }
 
-  function branchOffsetAt(routeDistance, junctionDistance, direction) {
-    const progress = THREE.MathUtils.clamp(
-      (routeDistance - (junctionDistance - 6)) / ROUTE_BRANCH_LENGTH,
-      0,
-      1,
-    );
-    const smoothProgress = progress * progress * (3 - 2 * progress);
-    const side = direction === "LEFT" ? 1 : -1;
-    return Math.sin(smoothProgress * Math.PI) * ROUTE_BRANCH_OFFSET * side;
+  function activeJunctionRoutes(descriptor) {
+    const routes = [];
+    for (let index = 0; index < descriptor.outgoingRoutes.length; index += 1) {
+      routes.push(descriptor.outgoingRoutes[index]);
+    }
+    return routes;
   }
 
-  function configureBranch(
-    meshes,
+  function mergeIntervals(intervals) {
+    intervals.sort((a, b) => a.min - b.min);
+    const merged = [];
+    for (let index = 0; index < intervals.length; index += 1) {
+      const interval = intervals[index];
+      const previous = merged[merged.length - 1];
+      if (previous && interval.min <= previous.max + 0.28) {
+        previous.max = Math.max(previous.max, interval.max);
+      } else {
+        merged.push({ min: interval.min, max: interval.max });
+      }
+    }
+    return merged;
+  }
+
+  function createJunctionSection(
     descriptor,
-    direction,
+    routes,
+    routeDistance,
     routeSampler,
     difficulty,
-    visible,
   ) {
-    for (let segment = 0; segment < meshes.length; segment += 1) {
-      const mesh = meshes[segment];
-      mesh.visible = visible;
-      if (!visible) continue;
-      const startDistance = (
-        descriptor.routeDistance - 6
-        + (segment / ROUTE_BRANCH_SEGMENTS) * ROUTE_BRANCH_LENGTH
-      );
-      const endDistance = (
-        descriptor.routeDistance - 6
-        + ((segment + 1) / ROUTE_BRANCH_SEGMENTS) * ROUTE_BRANCH_LENGTH
-      );
-      routeSampler(startDistance, difficulty, junctionSampleA);
-      routeSampler(endDistance, difficulty, junctionSampleB);
-      const startOffset = branchOffsetAt(
-        startDistance,
-        descriptor.routeDistance,
-        direction,
-      );
-      const endOffset = branchOffsetAt(
-        endDistance,
-        descriptor.routeDistance,
-        direction,
-      );
-      const startX = (
-        junctionSampleA.centerX + junctionSampleA.normalX * startOffset
-      );
-      const startZ = (
-        junctionSampleA.centerZ + junctionSampleA.normalZ * startOffset
-      );
-      const endX = (
-        junctionSampleB.centerX + junctionSampleB.normalX * endOffset
-      );
-      const endZ = (
-        junctionSampleB.centerZ + junctionSampleB.normalZ * endOffset
-      );
-      const deltaX = endX - startX;
-      const deltaZ = endZ - startZ;
-      const branchProgress = (segment + 0.5) / meshes.length;
-      const separation = Math.sin(branchProgress * Math.PI);
-      const roadWidth = (
-        junctionSampleA.width + junctionSampleB.width
-      ) * 0.5;
-      const branchWidth = THREE.MathUtils.lerp(
-        roadWidth * 0.64,
-        Math.max(5.8, roadWidth * 0.42),
-        separation,
-      );
-      mesh.position.set(
-        (startX + endX) * 0.5,
-        (junctionSampleA.centerY + junctionSampleB.centerY) * 0.5 + 0.069,
-        (startZ + endZ) * 0.5,
-      );
-      mesh.rotation.set(0, Math.atan2(deltaX, deltaZ), 0);
-      mesh.scale.set(
-        branchWidth,
-        1,
-        Math.hypot(deltaX, deltaZ) + 0.72,
-      );
+    const sample = {};
+    routeSampler(routeDistance, difficulty, sample);
+    const intervals = [];
+    for (let index = 0; index < routes.length; index += 1) {
+      const route = routes[index];
+      if (routeDistance > route.continuationEndRouteDistance) continue;
+      const offset = routeSegmentOffsetAt(routeDistance, route);
+      const width = routeSegmentWidthAt(routeDistance, route, sample.width);
+      intervals.push({
+        min: offset - width * 0.5,
+        max: offset + width * 0.5,
+      });
     }
+    return { sample, intervals: mergeIntervals(intervals) };
+  }
+
+  function writeJunctionVertex(visual, cursor, sample, lateralOffset) {
+    if (cursor >= JUNCTION_SURFACE_MAX_VERTICES) return cursor;
+    const offset = cursor * 3;
+    visual.positions[offset] = (
+      sample.centerX + sample.normalX * lateralOffset
+    );
+    visual.positions[offset + 1] = sample.centerY + JUNCTION_SURFACE_LIFT;
+    visual.positions[offset + 2] = (
+      sample.centerZ + sample.normalZ * lateralOffset
+    );
+    return cursor + 1;
+  }
+
+  function writeJunctionQuad(
+    visual,
+    cursor,
+    startSample,
+    startMin,
+    startMax,
+    endSample,
+    endMin,
+    endMax,
+  ) {
+    cursor = writeJunctionVertex(visual, cursor, startSample, startMin);
+    cursor = writeJunctionVertex(visual, cursor, endSample, endMin);
+    cursor = writeJunctionVertex(visual, cursor, endSample, endMax);
+    cursor = writeJunctionVertex(visual, cursor, startSample, startMin);
+    cursor = writeJunctionVertex(visual, cursor, endSample, endMax);
+    cursor = writeJunctionVertex(visual, cursor, startSample, startMax);
+    return cursor;
+  }
+
+  function connectJunctionSections(visual, cursor, start, end) {
+    const startIntervals = start.intervals;
+    const endIntervals = end.intervals;
+    if (startIntervals.length === endIntervals.length) {
+      for (let index = 0; index < startIntervals.length; index += 1) {
+        cursor = writeJunctionQuad(
+          visual,
+          cursor,
+          start.sample,
+          startIntervals[index].min,
+          startIntervals[index].max,
+          end.sample,
+          endIntervals[index].min,
+          endIntervals[index].max,
+        );
+      }
+      return cursor;
+    }
+    if (startIntervals.length === 1) {
+      const source = startIntervals[0];
+      const span = (source.max - source.min) / endIntervals.length;
+      for (let index = 0; index < endIntervals.length; index += 1) {
+        cursor = writeJunctionQuad(
+          visual,
+          cursor,
+          start.sample,
+          source.min + span * index,
+          source.min + span * (index + 1),
+          end.sample,
+          endIntervals[index].min,
+          endIntervals[index].max,
+        );
+      }
+      return cursor;
+    }
+    for (let endIndex = 0; endIndex < endIntervals.length; endIndex += 1) {
+      const target = endIntervals[endIndex];
+      let closestSource = null;
+      let closestDistance = Number.POSITIVE_INFINITY;
+      const targetCenter = (target.min + target.max) * 0.5;
+      for (let startIndex = 0; startIndex < startIntervals.length; startIndex += 1) {
+        const source = startIntervals[startIndex];
+        const sourceCenter = (source.min + source.max) * 0.5;
+        const distance = Math.abs(sourceCenter - targetCenter);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestSource = source;
+        }
+      }
+      if (closestSource) {
+        cursor = writeJunctionQuad(
+          visual,
+          cursor,
+          start.sample,
+          closestSource.min,
+          closestSource.max,
+          end.sample,
+          target.min,
+          target.max,
+        );
+      }
+    }
+    return cursor;
+  }
+
+  function configureJunctionSurface(
+    visual,
+    descriptor,
+    routeSampler,
+    difficulty,
+  ) {
+    const routes = activeJunctionRoutes(descriptor);
+    const surfaceStart = descriptor.routeDistance + JUNCTION_SURFACE_START;
+    const surfaceEnd = Math.max(
+      ...routes.map((route) => route.continuationEndRouteDistance),
+    );
+    const segmentCount = Math.ceil(
+      (surfaceEnd - surfaceStart) / JUNCTION_SURFACE_SAMPLE_SPACING,
+    );
+    let cursor = 0;
+    let previousSection = null;
+    for (let segment = 0; segment <= segmentCount; segment += 1) {
+      const progress = segment / segmentCount;
+      const routeDistance = THREE.MathUtils.lerp(
+        surfaceStart,
+        surfaceEnd,
+        progress,
+      );
+      const section = createJunctionSection(
+        descriptor,
+        routes,
+        routeDistance,
+        routeSampler,
+        difficulty,
+      );
+      if (previousSection) {
+        cursor = connectJunctionSections(
+          visual,
+          cursor,
+          previousSection,
+          section,
+        );
+      }
+      previousSection = section;
+    }
+    visual.surface.geometry.setDrawRange(0, cursor);
+    visual.surface.geometry.attributes.position.needsUpdate = true;
+    visual.surface.visible = cursor > 0;
+    return cursor;
+  }
+
+  function configureJunctionTracks(
+    visual,
+    descriptor,
+    routeSampler,
+    difficulty,
+  ) {
+    const routes = activeJunctionRoutes(descriptor);
+    let instanceIndex = 0;
+    for (let index = 0; index < routes.length; index += 1) {
+      const route = routes[index];
+      const trackEnd = route.continuationEndRouteDistance - 4;
+      for (
+        let routeDistance = descriptor.routeDistance + JUNCTION_TRACK_START;
+        routeDistance <= trackEnd;
+        routeDistance += JUNCTION_TRACK_SPACING
+      ) {
+        routeSampler(routeDistance, difficulty, junctionSampleA);
+        const offset = routeSegmentOffsetAt(routeDistance, route);
+        const offsetSlope = routeSegmentOffsetSlopeAt(routeDistance, route);
+        const tangentX = (
+          junctionSampleA.tangentX
+          + junctionSampleA.normalX * offsetSlope
+        );
+        const tangentZ = (
+          junctionSampleA.tangentZ
+          + junctionSampleA.normalZ * offsetSlope
+        );
+        const tangentLength = Math.hypot(tangentX, tangentZ);
+        const branchTangentX = tangentX / tangentLength;
+        const branchTangentZ = tangentZ / tangentLength;
+        const branchNormalX = branchTangentZ;
+        const branchNormalZ = -branchTangentX;
+        const centerX = (
+          junctionSampleA.centerX + junctionSampleA.normalX * offset
+        );
+        const centerZ = (
+          junctionSampleA.centerZ + junctionSampleA.normalZ * offset
+        );
+        const width = routeSegmentWidthAt(
+          routeDistance,
+          route,
+          junctionSampleA.width,
+        );
+        for (let trackSide = -1; trackSide <= 1; trackSide += 2) {
+          if (instanceIndex >= MAX_JUNCTION_TRACKS) break;
+          const trackOffset = trackSide * width * 0.22;
+          junctionTransform.position.set(
+            centerX + branchNormalX * trackOffset,
+            junctionSampleA.centerY + 0.038,
+            centerZ + branchNormalZ * trackOffset,
+          );
+          junctionTransform.rotation.set(
+            0,
+            Math.atan2(branchTangentX, branchTangentZ),
+            0,
+          );
+          junctionTransform.scale.set(1, 1, 1);
+          junctionTransform.updateMatrix();
+          visual.tracks.setMatrixAt(instanceIndex, junctionTransform.matrix);
+          instanceIndex += 1;
+        }
+      }
+    }
+    visual.tracks.count = instanceIndex;
+    visual.tracks.instanceMatrix.needsUpdate = true;
+    return instanceIndex;
   }
 
   function placeDirectionVillager(
@@ -1345,22 +1690,27 @@ export function createRoadGameplay(scene) {
     difficulty,
   ) {
     routeSampler(routeDistance, difficulty, junctionSampleA);
-    const branchOffset = direction === "STRAIGHT"
-      ? 0
-      : branchOffsetAt(routeDistance, descriptor.routeDistance, direction);
+    const route = descriptor.outgoingRoutes.find(
+      (outgoingRoute) => outgoingRoute.id === routeId,
+    );
+    if (route) {
+      applyRouteSegmentToSample(
+        routeDistance,
+        route,
+        junctionSampleA,
+      );
+    }
     const side = direction === "LEFT" ? 1 : -1;
     const roadsideOffset = isWrongRouteHelper
-      ? branchOffset + side * 3.3
+      ? side * (junctionSampleA.width * 0.5 + 2.5)
       : -(junctionSampleA.width * 0.5 + 2.5);
     villager.junctionId = descriptor.id;
     villager.routeId = routeId;
     villager.routeDistance = routeDistance;
     villager.isWrongRouteHelper = isWrongRouteHelper;
     villager.active = true;
-    villager.x = junctionSampleA.centerX
-      + junctionSampleA.normalX * roadsideOffset;
-    villager.z = junctionSampleA.centerZ
-      + junctionSampleA.normalZ * roadsideOffset;
+    villager.x = junctionSampleA.centerX + junctionSampleA.normalX * roadsideOffset;
+    villager.z = junctionSampleA.centerZ + junctionSampleA.normalZ * roadsideOffset;
     villager.group.position.set(
       villager.x,
       junctionSampleA.centerY + 0.01,
@@ -1383,63 +1733,33 @@ export function createRoadGameplay(scene) {
     difficulty,
   ) {
     let villagerIndex = 0;
+    junctionDebug.activeJunctions = 0;
+    junctionDebug.sharedSurfaceCount = 0;
     for (let index = 0; index < junctionVisuals.length; index += 1) {
       const descriptor = junctions[index];
       const visual = junctionVisuals[index];
       const active = index < count && descriptor.active;
       visual.group.visible = active;
-      visual.blend.visible = active;
-      let hasLeft = false;
-      let hasRight = false;
+      visual.surface.visible = active;
+      visual.tracks.count = 0;
+      junctionDebug.surfaceVertexCounts[index] = 0;
+      junctionDebug.branchTrackCounts[index] = 0;
       if (active) {
-        for (
-          let routeIndex = 0;
-          routeIndex < descriptor.outgoingRoutes.length;
-          routeIndex += 1
-        ) {
-          const route = descriptor.outgoingRoutes[routeIndex];
-          if (route.direction === "LEFT") hasLeft = true;
-          else if (route.direction === "RIGHT") hasRight = true;
-        }
-      }
-      if (active) {
-        routeSampler(
-          descriptor.routeDistance + JUNCTION_BLEND_LENGTH * 0.2,
+        junctionDebug.activeJunctions += 1;
+        junctionDebug.surfaceVertexCounts[index] = configureJunctionSurface(
+          visual,
+          descriptor,
+          routeSampler,
           difficulty,
-          junctionSampleA,
         );
-        visual.blend.position.set(
-          junctionSampleA.centerX,
-          junctionSampleA.centerY + 0.068,
-          junctionSampleA.centerZ,
+        junctionDebug.branchTrackCounts[index] = configureJunctionTracks(
+          visual,
+          descriptor,
+          routeSampler,
+          difficulty,
         );
-        visual.blend.rotation.set(
-          0,
-          Math.atan2(junctionSampleA.tangentX, junctionSampleA.tangentZ),
-          0,
-        );
-        visual.blend.scale.set(
-          junctionSampleA.width * 0.57,
-          1,
-          JUNCTION_BLEND_LENGTH * 0.44,
-        );
+        junctionDebug.sharedSurfaceCount += 1;
       }
-      configureBranch(
-        visual.left,
-        descriptor,
-        "LEFT",
-        routeSampler,
-        difficulty,
-        active && hasLeft,
-      );
-      configureBranch(
-        visual.right,
-        descriptor,
-        "RIGHT",
-        routeSampler,
-        difficulty,
-        active && hasRight,
-      );
       if (!active) continue;
 
       placeDirectionVillager(
@@ -1499,8 +1819,16 @@ export function createRoadGameplay(scene) {
 
   function resetRouteNetwork() {
     for (let index = 0; index < junctionVisuals.length; index += 1) {
-      junctionVisuals[index].group.visible = false;
+      const visual = junctionVisuals[index];
+      visual.group.visible = false;
+      visual.surface.visible = false;
+      visual.surface.geometry.setDrawRange(0, 0);
+      visual.tracks.count = 0;
+      junctionDebug.surfaceVertexCounts[index] = 0;
+      junctionDebug.branchTrackCounts[index] = 0;
     }
+    junctionDebug.activeJunctions = 0;
+    junctionDebug.sharedSurfaceCount = 0;
     for (let index = 0; index < directionVillagers.length; index += 1) {
       directionVillagers[index].active = false;
       directionVillagers[index].group.visible = false;
@@ -1527,6 +1855,12 @@ export function createRoadGameplay(scene) {
     destinationMarker.position.x += sample.normalX * lateralOffset;
     destinationMarker.position.z += sample.normalZ * lateralOffset;
     destinationMarker.name = `Destination-${villageName}`;
+    destinationMarker.userData.baseY = destinationMarker.position.y;
+    destinationMarker.visible = false;
+  }
+
+  function setDestinationVisible(visible) {
+    destinationMarker.visible = Boolean(visible);
   }
 
   function placeVillageObject(
@@ -1554,6 +1888,7 @@ export function createRoadGameplay(scene) {
   function configureVillage(descriptor, routeSampler, difficulty) {
     const random = seededVillageRandom(descriptor.seed);
     const regionType = descriptor.region ? descriptor.region.type : "Farming";
+    const appearance = descriptor.appearanceProgression || {};
     const startDistance = descriptor.entrance.routeDistance;
     const villageSpan = descriptor.routeDistance - startDistance + 24;
     const zones = descriptor.activityZones;
@@ -1585,18 +1920,40 @@ export function createRoadGameplay(scene) {
     missionVillage.centreX = junctionSampleA.centerX;
     missionVillage.centreZ = junctionSampleA.centerZ;
 
-    const ranks = Math.ceil(descriptor.size / 2);
+    const houseClusterCount = Math.max(2, Math.ceil(descriptor.size / 5));
+    const baseClusterSize = Math.floor(descriptor.size / houseClusterCount);
+    const largerClusterCount = descriptor.size % houseClusterCount;
+    const houseClusters = new Array(houseClusterCount);
+    for (let index = 0; index < houseClusterCount; index += 1) {
+      const progress = (index + 1) / (houseClusterCount + 1);
+      houseClusters[index] = {
+        size: baseClusterSize + (index < largerClusterCount ? 1 : 0),
+        routeDistance: THREE.MathUtils.lerp(
+          startDistance + 13,
+          descriptor.deliveryPoint.routeDistance - 12,
+          progress,
+        ),
+        lateralOffset: (
+          (index + descriptor.seed) % 2 ? 1 : -1
+        ) * (15.5 + random() * 2.8),
+      };
+    }
+    let clusterIndex = 0;
+    let clusterMemberIndex = 0;
     for (let index = 0; index < missionVillage.houses.length; index += 1) {
       const house = missionVillage.houses[index];
       if (index >= descriptor.size) {
         house.group.visible = false;
         continue;
       }
-      const side = index % 2 ? 1 : -1;
-      const rank = Math.floor(index / 2);
-      const progress = ranks <= 1 ? 0.5 : rank / (ranks - 1);
-      const routeDistance = startDistance + 10 + progress * (villageSpan - 18);
-      const lateral = side * (14.5 + random() * 5.5);
+      const cluster = houseClusters[clusterIndex];
+      const side = Math.sign(cluster.lateralOffset);
+      const memberOffset = (
+        clusterMemberIndex - (cluster.size - 1) * 0.5
+      ) * 4.8;
+      const routeDistance = cluster.routeDistance + memberOffset;
+      const lateral = cluster.lateralOffset
+        + side * (Math.abs(memberOffset) * 0.12 + random() * 1.2);
       const scale = 0.82 + random() * 0.25;
       house.body.material = regionType === "Riverside"
         ? VILLAGE_BLUE
@@ -1615,11 +1972,16 @@ export function createRoadGameplay(scene) {
         difficulty,
         side > 0 ? -Math.PI / 2 : Math.PI / 2,
       );
+      clusterMemberIndex += 1;
+      if (clusterMemberIndex >= cluster.size) {
+        clusterIndex += 1;
+        clusterMemberIndex = 0;
+      }
     }
 
     const residentCount = Math.min(
       missionVillage.villagers.length,
-      descriptor.population,
+      descriptor.population + (appearance.extraVillagers || 0),
     );
     for (let index = 0; index < missionVillage.villagers.length; index += 1) {
       const villager = missionVillage.villagers[index];
@@ -1644,9 +2006,7 @@ export function createRoadGameplay(scene) {
       else if (behavior === "feeding-cows") zone = zoneByType("animal-shed");
       else if (behavior === "sitting") zone = zoneByType("tea-stall");
       else if (behavior === "resting") {
-        zone = zoneByType(
-          descriptor.landmark === "Temple" ? "temple-area" : "banyan-tree",
-        );
+        zone = zoneByType("landmark");
       }
       const side = Math.sign(zone.lateralOffset) || (index % 2 ? 1 : -1);
       const child = index < descriptor.populationBreakdown.children;
@@ -1675,7 +2035,8 @@ export function createRoadGameplay(scene) {
     const animalCount = Math.min(
       missionVillage.animals.length,
       descriptor.populationBreakdown.cattle
-        + descriptor.populationBreakdown.buffaloes,
+        + descriptor.populationBreakdown.buffaloes
+        + (appearance.extraAnimals || 0),
     );
     for (let index = 0; index < missionVillage.animals.length; index += 1) {
       const animal = missionVillage.animals[index];
@@ -1713,10 +2074,13 @@ export function createRoadGameplay(scene) {
       const side = index % 2 ? 1 : -1;
       const scale = 0.75 + random() * 0.55;
       tree.scale.setScalar(scale);
+      const openSpaceOffset = (
+        (index % 4) - 1.5
+      ) * Math.max(3.6, descriptor.square.radius * 0.32);
       placeVillageObject(
         tree,
-        startDistance + 4 + random() * villageSpan,
-        side * (21 + random() * 8),
+        descriptor.square.routeDistance + openSpaceOffset,
+        side * (descriptor.square.radius + 7 + random() * 4),
         routeSampler,
         difficulty,
         random() * Math.PI * 2,
@@ -1734,14 +2098,14 @@ export function createRoadGameplay(scene) {
         continue;
       }
       const side = index % 2 ? 1 : -1;
+      const sectionIndex = Math.floor(index / 2);
       placeVillageObject(
         fence,
-        startDistance + 7 + (index / Math.max(1, fenceCount - 1)) * (villageSpan - 10),
-        side * 11.8,
+        startDistance + 14 + sectionIndex * 4.05,
+        side * 19,
         routeSampler,
         difficulty,
       );
-      fence.position.y += 0.36;
     }
 
     const propZoneTypes = [
@@ -1755,6 +2119,10 @@ export function createRoadGameplay(scene) {
     ];
     for (let index = 0; index < missionVillage.props.length; index += 1) {
       const prop = missionVillage.props[index];
+      if (index >= (appearance.villagePropCount || 14)) {
+        prop.group.visible = false;
+        continue;
+      }
       prop.group.scale.set(1, 1, 1);
       if (regionType === "Riverside" && prop.type === "wooden-cart") {
         prop.group.scale.set(1.45, 0.62, 0.72);
@@ -1775,17 +2143,25 @@ export function createRoadGameplay(scene) {
         prop.group.scale.set(1.15, 1, 1.25);
       }
       let propZone = zoneByType(propZoneTypes[index % propZoneTypes.length]);
-      if (propZone === zones[0] && propZoneTypes[index % propZoneTypes.length] === "delivery-market") {
-        propZone = zoneByType("grain-market");
+      if (propZone === zones[0]) {
+        const requestedZone = propZoneTypes[index % propZoneTypes.length];
+        if (requestedZone === "delivery-market") {
+          propZone = zoneByType("grain-market");
+        } else if (requestedZone === "grain-market") {
+          propZone = zoneByType("delivery-market");
+        }
       }
       const side = Math.sign(propZone.lateralOffset) || (index % 2 ? 1 : -1);
+      const zoneLateral = Math.abs(propZone.lateralOffset) >= 11
+        ? propZone.lateralOffset
+        : side * 13.5;
       placeVillageObject(
         prop.group,
-        propZone.routeDistance + (random() - 0.5) * propZone.radius,
-        propZone.lateralOffset + side * (1.4 + random() * Math.max(1.4, propZone.radius * 0.45)),
+        propZone.routeDistance + (random() - 0.5) * propZone.radius * 0.72,
+        zoneLateral + side * (1 + random() * Math.max(1, propZone.radius * 0.28)),
         routeSampler,
         difficulty,
-        random() * Math.PI,
+        side > 0 ? -Math.PI / 2 : Math.PI / 2,
       );
     }
 
@@ -1797,18 +2173,40 @@ export function createRoadGameplay(scene) {
       routeSampler,
       difficulty,
     );
-    const landmarkZone = zoneByType(
-      descriptor.landmark === "Temple" ? "temple-area" : "banyan-tree",
-    );
+    const landmarkZone = zoneByType("landmark");
+    const landmarkSide = Math.sign(landmarkZone.lateralOffset) || 1;
     placeVillageObject(
       missionVillage.landmark,
       landmarkZone.routeDistance,
       landmarkZone.lateralOffset,
       routeSampler,
       difficulty,
+      landmarkSide > 0 ? -Math.PI / 2 : Math.PI / 2,
     );
     missionVillage.temple.visible = descriptor.landmark === "Temple";
     missionVillage.banyan.visible = descriptor.landmark === "Banyan Tree";
+    missionVillage.landmarkWell.visible = descriptor.landmark === "Village Well";
+    missionVillage.grainMarket.visible = descriptor.landmark === "Grain Market";
+    missionVillage.panchayat.visible =
+      descriptor.landmark === "Panchayat Building";
+    missionVillage.well.visible = descriptor.landmark !== "Village Well";
+
+    for (let index = 0; index < missionVillage.guidanceSigns.length; index += 1) {
+      const sign = missionVillage.guidanceSigns[index];
+      const signDescriptor = descriptor.guidanceSigns[index];
+      if (!signDescriptor) {
+        sign.group.visible = false;
+        continue;
+      }
+      updateGuidanceSignLabel(sign, signDescriptor.label);
+      placeVillageObject(
+        sign.group,
+        signDescriptor.routeDistance,
+        signDescriptor.lateralOffset,
+        routeSampler,
+        difficulty,
+      );
+    }
 
     const deliverySide = Math.sign(descriptor.deliveryPoint.lateralOffset) || 1;
     missionVillage.deliveryBuilding.body.material = regionType === "Riverside"
@@ -1827,6 +2225,12 @@ export function createRoadGameplay(scene) {
     );
     missionVillage.activeVillagerCount = residentCount;
     missionVillage.activeAnimalCount = animalCount;
+    villageDebug.landmarkType = descriptor.landmark;
+    villageDebug.landmarkCount = 1;
+    villageDebug.guidanceSignCount = Math.min(
+      missionVillage.guidanceSigns.length,
+      descriptor.guidanceSigns.length,
+    );
   }
 
   function resetVillage() {
@@ -1837,9 +2241,22 @@ export function createRoadGameplay(scene) {
     villageDebug.activeVillageName = "None";
     villageDebug.activeVillagerCount = 0;
     villageDebug.activeAnimalCount = 0;
+    villageDebug.landmarkType = "None";
+    villageDebug.landmarkCount = 0;
+    villageDebug.guidanceSignCount = 0;
   }
 
   function updateVillage(playerPosition, elapsed) {
+    if (destinationMarker.visible) {
+      const pulse = Math.sin(elapsed * 2.4) * 0.5 + 0.5;
+      const scale = 0.96 + pulse * 0.1;
+      destinationMarker.scale.setScalar(scale);
+      destinationMarker.position.y = destinationMarker.userData.baseY
+        + Math.sin(elapsed * 1.8) * 0.12;
+      destinationMarker.userData.pad.material.opacity = 0.42 + pulse * 0.28;
+      destinationMarker.userData.glow.material.opacity = 0.12 + pulse * 0.14;
+      destinationMarker.userData.crate.rotation.y += 0.006;
+    }
     if (!missionVillage.group.visible || !missionVillage.descriptor) {
       villageDebug.activeVillageName = "None";
       villageDebug.activeVillagerCount = 0;
@@ -1934,6 +2351,7 @@ export function createRoadGameplay(scene) {
 
   function resetMissionMarkers() {
     destinationMarker.visible = false;
+    destinationMarker.scale.setScalar(1);
     for (let index = 0; index < checkpointMarkers.length; index += 1) {
       checkpointMarkers[index].visible = false;
     }
@@ -1946,7 +2364,13 @@ export function createRoadGameplay(scene) {
     const forwardZ = Math.cos(heading);
 
     for (const obstacle of obstacles) {
-      if (!obstacle.active || obstacle.hit) continue;
+      if (
+        !obstacle.active
+        || obstacle.hit
+        || obstacle.category !== "hazard"
+        || obstacle.collidable !== true
+        || obstacle.damaging !== true
+      ) continue;
       const dx = obstacle.x - position.x;
       const dz = obstacle.z - position.z;
       const lateral = dx * sideX + dz * sideZ;
@@ -1969,7 +2393,12 @@ export function createRoadGameplay(scene) {
         partIndex += 1
       ) {
         const part = event.collisionParts[partIndex];
-        if (!part.active) continue;
+        if (
+          !part.active
+          || part.category !== "hazard"
+          || part.collidable !== true
+          || part.damaging !== true
+        ) continue;
         const dx = part.x - position.x;
         const dz = part.z - position.z;
         const lateral = dx * sideX + dz * sideZ;
@@ -1990,6 +2419,58 @@ export function createRoadGameplay(scene) {
       }
     }
     return null;
+  }
+
+  function checkForwardSafety(position, heading, lookAhead, target) {
+    target.obstacleAhead = false;
+    target.blocked = false;
+    target.smallObstacle = false;
+    target.side = 0;
+    target.distance = Number.POSITIVE_INFINITY;
+    target.reason = "None";
+    const sideX = Math.cos(heading);
+    const sideZ = -Math.sin(heading);
+    const forwardX = Math.sin(heading);
+    const forwardZ = Math.cos(heading);
+    for (let index = 0; index < obstacles.length; index += 1) {
+      const obstacle = obstacles[index];
+      if (!obstacle.active || obstacle.hit || obstacle.collidable !== true) continue;
+      const dx = obstacle.x - position.x;
+      const dz = obstacle.z - position.z;
+      const forward = dx * forwardX + dz * forwardZ;
+      if (forward <= 2 || forward >= lookAhead) continue;
+      const lateral = dx * sideX + dz * sideZ;
+      const clearance = obstacle.radius + 1.45;
+      if (Math.abs(lateral) > clearance) continue;
+      if (forward >= target.distance) continue;
+      target.obstacleAhead = true;
+      target.smallObstacle = clearance < 2.45;
+      target.blocked = !target.smallObstacle;
+      target.side = lateral >= 0 ? 1 : -1;
+      target.distance = forward;
+      target.reason = target.smallObstacle ? "SMALL_OBSTACLE" : "ROAD_OBSTACLE";
+    }
+    for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
+      const event = events[eventIndex];
+      if (!event.active || event.hit) continue;
+      for (let partIndex = 0; partIndex < event.collisionParts.length; partIndex += 1) {
+        const part = event.collisionParts[partIndex];
+        if (!part.active || part.collidable !== true) continue;
+        const dx = part.x - position.x;
+        const dz = part.z - position.z;
+        const forward = dx * forwardX + dz * forwardZ;
+        if (forward <= 2 || forward >= lookAhead || forward >= target.distance) continue;
+        const lateral = dx * sideX + dz * sideZ;
+        if (Math.abs(lateral) > part.radius + 1.55) continue;
+        target.obstacleAhead = true;
+        target.smallObstacle = false;
+        target.blocked = true;
+        target.side = lateral >= 0 ? 1 : -1;
+        target.distance = forward;
+        target.reason = "ROUTE_BLOCKED";
+      }
+    }
+    return target;
   }
 
   function sampleSurface(position, target = {}) {
@@ -2029,12 +2510,15 @@ export function createRoadGameplay(scene) {
     hazards: obstacles,
     events,
     directionVillagers,
+    junctionDebug,
     destinationMarker,
     missionVillage,
     checkpointMarkers,
     checkImpact,
+    checkForwardSafety,
     sampleSurface,
     placeDestination,
+    setDestinationVisible,
     configureVillage,
     updateVillage,
     villageDebug,

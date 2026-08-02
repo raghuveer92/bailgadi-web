@@ -11,6 +11,10 @@ export const SURFACE_MUD = "MUD";
 export const MAX_ROUTE_HAZARDS = 24;
 export const MAX_ROUTE_EVENTS = 8;
 export const MAX_ROUTE_JUNCTIONS = 3;
+export const ROUTE_FORK_APPROACH_DISTANCE = 20;
+export const ROUTE_FORK_MIN_SEPARATION_DISTANCE = 120;
+export const TURNAROUND_USABLE_WIDTH = 22;
+export const TURNAROUND_USABLE_LENGTH = 28;
 
 export const HAZARD_ROCK = "rock";
 export const HAZARD_FALLEN_BRANCH = "fallen-branch";
@@ -44,6 +48,10 @@ const MAX_POTS = 8;
 const MAX_WOOD_PILES = 8;
 const MAX_SIGNS = 5;
 const MAX_EVENT_PEOPLE = 20;
+const MAX_ACTIVITY_ANIMALS = 6;
+const MAX_ACTIVITY_PROPS = 8;
+const MAX_ACTIVITY_SHELTERS = 2;
+const MAX_ACTIVITY_SMOKE = 4;
 const OBSTACLES_PER_CHUNK = 10;
 const WORLD_HALF_WIDTH = 135;
 const HAZARD_START_CLEARANCE = 58;
@@ -53,6 +61,80 @@ const EVENT_START_CLEARANCE = 62;
 const EVENT_DESTINATION_CLEARANCE = 70;
 const EVENT_CHECKPOINT_CLEARANCE = 18;
 const EVENT_HAZARD_CLEARANCE = 2.5;
+const ROADSIDE_SAFETY_MARGIN = 1.75;
+const PROP_CATEGORY_NATURAL = "natural";
+const PROP_CATEGORY_CONSTRUCTED = "constructed";
+const PROP_PLACEMENT_ROADSIDE = "roadside";
+const AMBIENT_ACTIVITY_SPACING = 150;
+const AMBIENT_ACTIVITY_EDGE_CLEARANCE = 8;
+
+const AMBIENT_ACTIVITY_TYPES = Object.freeze({
+  FARMER_PLOUGHING: "Farmer Ploughing",
+  VILLAGERS_SITTING: "Villagers Under Tree",
+  SHEPHERD: "Shepherd and Flock",
+  WATER_CARRIERS: "Women Carrying Water",
+  PARKED_CART: "Parked Bullock Cart",
+  TEA_STALL: "Roadside Tea Stall",
+  CHILDREN_PLAYING: "Children Playing",
+  CATTLE_GRAZING: "Cattle Grazing",
+  WOODCUTTING: "Woodcutting Area",
+  SHRINE: "Roadside Shrine",
+  FISHERMEN: "Riverside Fishermen",
+  WASHING: "Washing by the Water",
+});
+const FARMING_ACTIVITIES = Object.freeze([
+  AMBIENT_ACTIVITY_TYPES.FARMER_PLOUGHING,
+  AMBIENT_ACTIVITY_TYPES.FARMER_PLOUGHING,
+  AMBIENT_ACTIVITY_TYPES.PARKED_CART,
+  AMBIENT_ACTIVITY_TYPES.WATER_CARRIERS,
+  AMBIENT_ACTIVITY_TYPES.CATTLE_GRAZING,
+]);
+const FOREST_ACTIVITIES = Object.freeze([
+  AMBIENT_ACTIVITY_TYPES.WOODCUTTING,
+  AMBIENT_ACTIVITY_TYPES.WOODCUTTING,
+  AMBIENT_ACTIVITY_TYPES.SHEPHERD,
+  AMBIENT_ACTIVITY_TYPES.CATTLE_GRAZING,
+  AMBIENT_ACTIVITY_TYPES.SHRINE,
+  AMBIENT_ACTIVITY_TYPES.VILLAGERS_SITTING,
+]);
+const RIVERSIDE_ACTIVITIES = Object.freeze([
+  AMBIENT_ACTIVITY_TYPES.FISHERMEN,
+  AMBIENT_ACTIVITY_TYPES.WASHING,
+  AMBIENT_ACTIVITY_TYPES.WATER_CARRIERS,
+  AMBIENT_ACTIVITY_TYPES.FISHERMEN,
+]);
+const GRASSLAND_ACTIVITIES = Object.freeze([
+  AMBIENT_ACTIVITY_TYPES.SHEPHERD,
+  AMBIENT_ACTIVITY_TYPES.CATTLE_GRAZING,
+  AMBIENT_ACTIVITY_TYPES.VILLAGERS_SITTING,
+]);
+const DRY_ROCKY_ACTIVITIES = Object.freeze([
+  AMBIENT_ACTIVITY_TYPES.SHEPHERD,
+  AMBIENT_ACTIVITY_TYPES.CATTLE_GRAZING,
+  AMBIENT_ACTIVITY_TYPES.SHRINE,
+  AMBIENT_ACTIVITY_TYPES.WATER_CARRIERS,
+]);
+const VILLAGE_EDGE_ACTIVITIES = Object.freeze([
+  AMBIENT_ACTIVITY_TYPES.TEA_STALL,
+  AMBIENT_ACTIVITY_TYPES.PARKED_CART,
+  AMBIENT_ACTIVITY_TYPES.CHILDREN_PLAYING,
+  AMBIENT_ACTIVITY_TYPES.WATER_CARRIERS,
+  AMBIENT_ACTIVITY_TYPES.VILLAGERS_SITTING,
+]);
+
+function propMetadata(
+  category,
+  placementContext,
+  collidable = false,
+  damaging = false,
+) {
+  return Object.freeze({
+    category,
+    collidable,
+    damaging,
+    placementContext,
+  });
+}
 
 const ROAD_LAYOUTS = Object.freeze([
   "Straight",
@@ -156,10 +238,49 @@ const VILLAGE_THEMES = Object.freeze([
 
 const DELIVERY_LOCATIONS = Object.freeze([
   "Grain Market",
-  "Village Shop",
   "Warehouse",
-  "Farmer House",
-  "Milk Collection Centre",
+  "Merchant Shop",
+  "Village Center",
+]);
+
+const VILLAGE_LANDMARK_TYPES = Object.freeze([
+  "Temple",
+  "Banyan Tree",
+  "Village Well",
+  "Grain Market",
+  "Panchayat Building",
+]);
+const VILLAGE_OCCUPATIONS = Object.freeze([
+  Object.freeze({
+    occupation: "Farmers",
+    knownFor: "Wheat Farming",
+    primaryBusiness: "Wheat and Grain",
+  }),
+  Object.freeze({
+    occupation: "Dairy Farmers",
+    knownFor: "Milk and Ghee",
+    primaryBusiness: "Dairy",
+  }),
+  Object.freeze({
+    occupation: "Potters",
+    knownFor: "Clay Pottery",
+    primaryBusiness: "Pottery",
+  }),
+  Object.freeze({
+    occupation: "Woodworkers",
+    knownFor: "Carpentry",
+    primaryBusiness: "Timber and Carts",
+  }),
+  Object.freeze({
+    occupation: "Market Traders",
+    knownFor: "Weekly Market",
+    primaryBusiness: "Village Trade",
+  }),
+  Object.freeze({
+    occupation: "Orchard Keepers",
+    knownFor: "Mango Orchards",
+    primaryBusiness: "Fruit",
+  }),
 ]);
 
 const LANDMARKS = Object.freeze([
@@ -170,15 +291,6 @@ const LANDMARKS = Object.freeze([
   "Water Tower",
   "Village Gate",
   "Ancient Well",
-]);
-
-const WORLD_EVENTS = Object.freeze([
-  "Wedding Procession",
-  "Farmers Harvesting",
-  "Shepherd with Goats",
-  "Opposite Bullock Cart",
-  "School Children Walking",
-  "Weekly Market",
 ]);
 
 const materials = {
@@ -213,6 +325,14 @@ const materials = {
   dark: new THREE.MeshStandardMaterial({ color: 0x39312a, roughness: 0.9 }),
   bright: new THREE.MeshStandardMaterial({ color: 0xe0ad3e, roughness: 0.9 }),
   event: new THREE.MeshStandardMaterial({ color: 0xc9533e, roughness: 0.9 }),
+  activityAnimal: new THREE.MeshStandardMaterial({ color: 0xd8cfb1, roughness: 0.94 }),
+  activitySmoke: new THREE.MeshStandardMaterial({
+    color: 0xb8b1a2,
+    roughness: 1,
+    transparent: true,
+    opacity: 0.38,
+    depthWrite: false,
+  }),
 };
 
 const geometries = {
@@ -227,6 +347,9 @@ const geometries = {
   roof: new THREE.ConeGeometry(3.45, 1.8, 4),
   prop: new THREE.BoxGeometry(0.4, 1.2, 1.2),
   person: new THREE.CylinderGeometry(0.17, 0.23, 1.25, 6),
+  activityAnimal: new THREE.BoxGeometry(1.25, 0.68, 0.62),
+  activityHead: new THREE.SphereGeometry(0.16, 7, 5),
+  activitySmoke: new THREE.SphereGeometry(0.34, 7, 5),
   water: new THREE.PlaneGeometry(1, 1),
   box: new THREE.BoxGeometry(1, 1, 1),
   cylinder: new THREE.CylinderGeometry(0.5, 0.5, 1, 8),
@@ -333,6 +456,15 @@ function slugifyVillageName(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
+function hashVillageName(name) {
+  let value = 2166136261;
+  for (let index = 0; index < name.length; index += 1) {
+    value ^= name.charCodeAt(index);
+    value = Math.imul(value, 16777619);
+  }
+  return value >>> 0;
+}
+
 export function generateVillageDescriptor(
   seed,
   routeDistance,
@@ -342,20 +474,43 @@ export function generateVillageDescriptor(
   target = {},
   regionDescriptor = null,
 ) {
-  const villageSeed = hashUint(seed >>> 0, missionKey, 2400);
   const name = preferredName || VILLAGE_NAMES[
-    hashUint(villageSeed, missionKey, 2401) % VILLAGE_NAMES.length
+    hashUint(seed >>> 0, missionKey, 2401) % VILLAGE_NAMES.length
   ];
+  const identitySeed = preferredName
+    ? hashVillageName(name)
+    : seed >>> 0;
+  const villageSeed = hashUint(identitySeed, missionKey, 2400);
   const size = 8 + (hashUint(villageSeed, missionKey, 2402) % 13);
   const population = Math.min(
     28,
     8 + Math.floor(size * 0.7) + (hashUint(villageSeed, missionKey, 2403) % 5),
   );
-  const entranceDistance = 50 + (hashUint(villageSeed, missionKey, 2404) % 9);
+  const entranceDistance = 64 + (hashUint(villageSeed, missionKey, 2404) % 6);
   const deliverySide = hash01(villageSeed, missionKey, 2405) > 0.5 ? 1 : -1;
   const deliveryType = DELIVERY_LOCATIONS[
     hashUint(villageSeed, missionKey, 2406) % DELIVERY_LOCATIONS.length
   ];
+  const landmark = VILLAGE_LANDMARK_TYPES[
+    hashUint(villageSeed, missionKey, 2411) % VILLAGE_LANDMARK_TYPES.length
+  ];
+  const occupation = VILLAGE_OCCUPATIONS[
+    hashUint(villageSeed, missionKey, 2418) % VILLAGE_OCCUPATIONS.length
+  ];
+  const populationSize = population < 16
+    ? "Small"
+    : population < 23 ? "Medium" : "Large";
+  const wealthLevels = ["Modest", "Comfortable", "Prosperous"];
+  const wealthLevel = wealthLevels[
+    hashUint(villageSeed, missionKey, 2419) % wealthLevels.length
+  ];
+  const landmarkRouteDistance = (
+    routeDistance - 20 - (hashUint(villageSeed, missionKey, 2416) % 5)
+  );
+  const landmarkLateralOffset = (
+    deliverySide * (11.5 + hash01(villageSeed, missionKey, 2417) * 1.5)
+  );
+  const localArrow = deliverySide > 0 ? "←" : "→";
 
   target.id = `${slugifyVillageName(name)}-${villageSeed.toString(16).padStart(8, "0")}`;
   target.name = name;
@@ -382,6 +537,15 @@ export function generateVillageDescriptor(
   target.size = size;
   target.seed = villageSeed;
   target.population = population;
+  target.populationSize = populationSize;
+  target.dominantOccupation = occupation.occupation;
+  target.knownFor = occupation.knownFor;
+  target.primaryCropBusiness = occupation.primaryBusiness;
+  target.wealthLevel = wealthLevel;
+  target.reputation = 0;
+  target.completedDeliveries = 0;
+  target.unlocked = false;
+  target.unlockedFeatures = ["small-contracts"];
   target.populationBreakdown = {
     children: Math.max(2, Math.floor(population * 0.28)),
     farmers: Math.max(2, Math.floor(population * 0.34)),
@@ -394,8 +558,8 @@ export function generateVillageDescriptor(
     label: `Welcome to ${name}`,
   };
   target.square = {
-    routeDistance: routeDistance - 21,
-    radius: 13 + (size > 14 ? 2 : 0),
+    routeDistance: landmarkRouteDistance - 2,
+    radius: 11 + (size > 14 ? 1.5 : 0),
   };
   target.deliveryPoint = {
     id: `${target.id}-delivery`,
@@ -403,10 +567,40 @@ export function generateVillageDescriptor(
     routeDistance,
     lateralOffset: deliverySide * (4.2 + hash01(villageSeed, missionKey, 2410) * 1.2),
   };
-  target.landmark = hash01(villageSeed, missionKey, 2411) > 0.5
-    ? "Temple"
-    : "Banyan Tree";
-  const landmarkSide = deliverySide * -1;
+  target.landmark = landmark;
+  target.layout = {
+    entranceRouteDistance: target.entrance.routeDistance,
+    mainRoadStart: target.entrance.routeDistance,
+    mainRoadEnd: target.deliveryPoint.routeDistance,
+    landmarkRouteDistance,
+    deliveryRouteDistance: target.deliveryPoint.routeDistance,
+  };
+  target.guidanceSigns = [
+    {
+      id: `${target.id}-landmark-sign`,
+      label: `${landmark} ${localArrow}`,
+      routeDistance: target.entrance.routeDistance + 10,
+      lateralOffset: deliverySide * -8.8,
+      target: "landmark",
+      direction: localArrow,
+    },
+    {
+      id: `${target.id}-delivery-sign-center`,
+      label: `Delivery ${localArrow}`,
+      routeDistance: landmarkRouteDistance - 7,
+      lateralOffset: deliverySide * -8.8,
+      target: "delivery",
+      direction: localArrow,
+    },
+    {
+      id: `${target.id}-delivery-sign-near`,
+      label: `Delivery ${localArrow}`,
+      routeDistance: routeDistance - 9,
+      lateralOffset: deliverySide * -8.8,
+      target: "delivery",
+      direction: localArrow,
+    },
+  ];
   target.activityZones = [
     {
       id: `${target.id}-square`,
@@ -418,44 +612,53 @@ export function generateVillageDescriptor(
     {
       id: `${target.id}-tea-stall`,
       type: "tea-stall",
-      routeDistance: routeDistance - 31,
-      lateralOffset: deliverySide * -10.5,
-      radius: 5,
+      routeDistance: landmarkRouteDistance - 11,
+      lateralOffset: deliverySide * -13.5,
+      radius: 4,
     },
     {
       id: `${target.id}-landmark`,
-      type: target.landmark === "Temple" ? "temple-area" : "banyan-tree",
-      routeDistance: target.square.routeDistance + 4,
-      lateralOffset: landmarkSide * 10.5,
+      type: "landmark",
+      landmarkType: landmark,
+      routeDistance: landmarkRouteDistance,
+      lateralOffset: landmarkLateralOffset,
       radius: 6,
     },
     {
       id: `${target.id}-well`,
       type: "well",
-      routeDistance: target.square.routeDistance - 3,
-      lateralOffset: deliverySide * 8.5,
+      routeDistance: landmark === "Village Well"
+        ? landmarkRouteDistance
+        : landmarkRouteDistance - 6,
+      lateralOffset: landmark === "Village Well"
+        ? landmarkLateralOffset
+        : deliverySide * -13,
       radius: 4.5,
     },
     {
       id: `${target.id}-animal-shed`,
       type: "animal-shed",
-      routeDistance: routeDistance - 13,
-      lateralOffset: deliverySide * -15.5,
-      radius: 6.5,
+      routeDistance: landmarkRouteDistance + 7,
+      lateralOffset: deliverySide * -17,
+      radius: 5.5,
     },
     {
       id: `${target.id}-market`,
-      type: deliveryType === "Grain Market" ? "grain-market" : "delivery-market",
-      routeDistance: routeDistance - 2,
-      lateralOffset: target.deliveryPoint.lateralOffset,
-      radius: 6,
+      type: landmark === "Grain Market" ? "grain-market" : "delivery-market",
+      routeDistance: landmark === "Grain Market"
+        ? landmarkRouteDistance
+        : routeDistance - 6,
+      lateralOffset: landmark === "Grain Market"
+        ? landmarkLateralOffset
+        : deliverySide * 13,
+      radius: 5,
     },
     {
       id: `${target.id}-houses`,
       type: "houses",
-      routeDistance: routeDistance - 25,
+      routeDistance: target.square.routeDistance,
       lateralOffset: 0,
-      radius: 28,
+      radius: 24,
     },
   ];
   target.decorationCounts = {
@@ -478,6 +681,117 @@ export function generateVillageDescriptor(
 
 function smoothstep(value) {
   return value * value * (3 - 2 * value);
+}
+
+function routeSegmentProgress(routeDistance, route) {
+  return THREE.MathUtils.clamp(
+    (
+      routeDistance - route.divergenceStartRouteDistance
+    ) / route.divergenceLength,
+    0,
+    1,
+  );
+}
+
+export function routeSegmentOffsetAt(routeDistance, route) {
+  const progress = routeSegmentProgress(routeDistance, route);
+  return THREE.MathUtils.lerp(
+    route.incomingOffset,
+    route.outgoingOffset,
+    smoothstep(progress),
+  );
+}
+
+export function routeSegmentOffsetSlopeAt(routeDistance, route) {
+  const progress = routeSegmentProgress(routeDistance, route);
+  if (progress <= 0 || progress >= 1) return 0;
+  return (
+    (route.outgoingOffset - route.incomingOffset)
+    * 6
+    * progress
+    * (1 - progress)
+    / route.divergenceLength
+  );
+}
+
+export function routeSegmentWidthAt(routeDistance, route, baseWidth = 6.4) {
+  const approachProgress = THREE.MathUtils.clamp(
+    (
+      routeDistance
+      - (route.startRouteDistance - ROUTE_FORK_APPROACH_DISTANCE)
+    ) / ROUTE_FORK_APPROACH_DISTANCE,
+    0,
+    1,
+  );
+  if (routeDistance < route.startRouteDistance) {
+    return THREE.MathUtils.lerp(
+      baseWidth,
+      route.junctionWidth,
+      smoothstep(approachProgress),
+    );
+  }
+  const divergenceProgress = routeSegmentProgress(routeDistance, route);
+  let width = THREE.MathUtils.lerp(
+    route.junctionWidth,
+    route.width,
+    smoothstep(divergenceProgress),
+  );
+  if (!route.isCorrect) {
+    const turnaroundLength = route.turnaroundLength || TURNAROUND_USABLE_LENGTH;
+    const turnaroundProgress = THREE.MathUtils.clamp(
+      (routeDistance - (route.endRouteDistance - turnaroundLength))
+        / turnaroundLength,
+      0,
+      1,
+    );
+    width = THREE.MathUtils.lerp(
+      width,
+      route.turnaroundWidth,
+      smoothstep(turnaroundProgress),
+    );
+  }
+  return width;
+}
+
+export function applyRouteSegmentToSample(
+  routeDistance,
+  route,
+  sample,
+  worldX,
+) {
+  if (!route) return sample;
+  const offset = routeSegmentOffsetAt(routeDistance, route);
+  const offsetSlope = routeSegmentOffsetSlopeAt(routeDistance, route);
+  const normalX = sample.normalX ?? sample.tangentZ;
+  const normalZ = sample.normalZ ?? -sample.tangentX;
+  const tangentX = sample.tangentX + normalX * offsetSlope;
+  const tangentZ = sample.tangentZ + normalZ * offsetSlope;
+  const tangentLength = Math.hypot(tangentX, tangentZ);
+  sample.centerX += normalX * offset;
+  if (typeof sample.centerZ === "number") sample.centerZ += normalZ * offset;
+  sample.tangentX = tangentX / tangentLength;
+  sample.tangentZ = tangentZ / tangentLength;
+  sample.normalX = sample.tangentZ;
+  sample.normalZ = -sample.tangentX;
+  sample.width = routeSegmentWidthAt(routeDistance, route, sample.width);
+  sample.routeId = route.id;
+  sample.routeStartDistance = route.startRouteDistance;
+  sample.routeEndDistance = route.endRouteDistance;
+  if (!route.isCorrect && routeDistance > route.endRouteDistance) {
+    sample.width = 0;
+  }
+  if (typeof worldX === "number") {
+    const signedOffset = (
+      (worldX - sample.centerX) * sample.normalX
+    );
+    sample.normalizedOffset = sample.width > 0
+      ? signedOffset / (sample.width * 0.5)
+      : Number.POSITIVE_INFINITY;
+    sample.distanceFromCenter = Math.abs(signedOffset);
+    sample.isOnRoad = sample.width > 0
+      && sample.distanceFromCenter <= sample.width * 0.5;
+  }
+  return sample;
 }
 
 function createStripGeometry(segments, withColor = false) {
@@ -573,7 +887,18 @@ function surfaceTypeAt(themeIndex, distanceFromCenter, width) {
 }
 
 function roadLayoutIndexFor(seed, chunkIndex, difficulty) {
-  let layoutIndex = hashUint(seed, chunkIndex, 11) % ROAD_LAYOUTS.length;
+  const roll = hash01(seed, chunkIndex, 11);
+  let layoutIndex;
+  if (roll < 0.31) layoutIndex = 1;
+  else if (roll < 0.62) layoutIndex = 2;
+  else if (roll < 0.70) layoutIndex = 3;
+  else if (roll < 0.75) layoutIndex = 4;
+  else if (roll < 0.82) layoutIndex = 5;
+  else if (roll < 0.87) layoutIndex = 6;
+  else if (roll < 0.92) layoutIndex = 7;
+  else if (roll < 0.97) layoutIndex = 8;
+  else if (roll < 0.99) layoutIndex = 9;
+  else layoutIndex = 0;
   const challenge = Math.max(0, difficulty - 1);
   const bias = hash01(seed, chunkIndex, 12);
   if (challenge >= 2 && bias < 0.16 + challenge * 0.035) {
@@ -587,27 +912,39 @@ function roadLayoutIndexFor(seed, chunkIndex, difficulty) {
 function chunkCenterOffset(seed, globalZ, difficulty) {
   const phaseA = (seed % 997) * 0.0063;
   const phaseB = (seed % 487) * 0.0129;
-  const scale = 1 + Math.max(0, difficulty - 1) * 0.08;
+  const scale = 1 + Math.max(0, difficulty - 1) * 0.045;
   return (
-    Math.sin(globalZ * 0.0085 + phaseA) * 1.8
-    + Math.sin(globalZ * 0.0037 + phaseB) * 1.35
+    Math.sin(globalZ * 0.0115 + phaseA) * 3.8
+    + Math.sin(globalZ * 0.0043 + phaseB) * 2.2
   ) * scale;
 }
 
-function localRoadOffset(layoutIndex, progress, difficulty) {
+function localRoadOffset(seed, chunkIndex, layoutIndex, progress, difficulty) {
   const hump = 16 * progress * progress * (1 - progress) * (1 - progress);
-  const curveScale = 1 + Math.max(0, difficulty - 1) * 0.11;
-  if (layoutIndex === 1) return hump * 2.2 * curveScale;
-  if (layoutIndex === 2) return -hump * 2.2 * curveScale;
+  const curveScale = 1 + Math.max(0, difficulty - 1) * 0.055;
+  const amplitude = 4.4 + hash01(seed, chunkIndex, 15) * 2.4;
+  const asymmetry = (hash01(seed, chunkIndex, 16) - 0.5) * 0.72;
+  const unevenProfile = 1 + (progress - 0.5) * asymmetry;
+  if (layoutIndex === 1) return hump * amplitude * unevenProfile * curveScale;
+  if (layoutIndex === 2) return -hump * amplitude * unevenProfile * curveScale;
   if (layoutIndex === 3) {
-    return Math.sin(progress * Math.PI * 2) * hump * 1.55 * curveScale;
+    const phase = (hash01(seed, chunkIndex, 17) - 0.5) * 0.9;
+    return (
+      Math.sin(progress * Math.PI * 2 + phase)
+      * hump
+      * amplitude
+      * 0.58
+      * unevenProfile
+      * curveScale
+    );
   }
   return 0;
 }
 
 function boundaryRoadWidth(seed, boundaryIndex, difficulty) {
-  const difficultyNarrowing = Math.max(0, difficulty - 1) * 0.28;
-  return 15.5 + (hash01(seed, boundaryIndex, 71) - 0.5) * 1.8 - difficultyNarrowing;
+  const difficultyNarrowing = Math.max(0, difficulty - 1) * 0.1;
+  return 6.4 + (hash01(seed, boundaryIndex, 71) - 0.5) * 1.6
+    - difficultyNarrowing;
 }
 
 function roadWidthAt(seed, chunkIndex, layoutIndex, progress, difficulty) {
@@ -615,24 +952,35 @@ function roadWidthAt(seed, chunkIndex, layoutIndex, progress, difficulty) {
   const endWidth = boundaryRoadWidth(seed, chunkIndex + 1, difficulty);
   const hump = 16 * progress * progress * (1 - progress) * (1 - progress);
   let middleWidthOffset = 0;
-  if (layoutIndex === 4) middleWidthOffset = 2.4 * hump;
-  if (layoutIndex === 5) middleWidthOffset = -2.6 * hump;
-  if (layoutIndex === 6) middleWidthOffset = 3.1 * hump;
-  return THREE.MathUtils.lerp(startWidth, endWidth, smoothstep(progress))
-    + middleWidthOffset;
+  if (layoutIndex === 4) middleWidthOffset = 0.5 * hump;
+  if (layoutIndex === 5) middleWidthOffset = -0.9 * hump;
+  if (layoutIndex === 6) middleWidthOffset = 1.2 * hump;
+  return THREE.MathUtils.clamp(
+    THREE.MathUtils.lerp(startWidth, endWidth, smoothstep(progress))
+      + middleWidthOffset,
+    5.2,
+    7.8,
+  );
 }
 
-function roadHeightAt(layoutIndex, globalZ, progress) {
+function roadHeightAt(seed, chunkIndex, layoutIndex, globalZ, progress) {
   const elevationHump = 16 * progress * progress * (1 - progress) * (1 - progress);
-  if (layoutIndex === 7) return 0.038 + elevationHump * 0.018;
-  if (layoutIndex === 8) return 0.038 - elevationHump * 0.014;
+  const phaseA = (seed % 719) * 0.0087;
+  const phaseB = (seed % 353) * 0.0173;
+  const terrainHeight = (
+    Math.sin(globalZ * 0.021 + phaseA) * 0.48
+    + Math.sin(globalZ * 0.008 + phaseB) * 0.34
+  );
+  const elevationScale = 0.58 + hash01(seed, chunkIndex, 18) * 0.34;
+  if (layoutIndex === 7) return 0.038 + terrainHeight + elevationHump * elevationScale;
+  if (layoutIndex === 8) return 0.038 + terrainHeight - elevationHump * elevationScale * 0.82;
   if (layoutIndex === 9) {
-    return 0.038 + (
+    return 0.038 + terrainHeight + (
       Math.sin(globalZ * 0.7) * 0.006
       + Math.sin(globalZ * 0.29) * 0.004
     ) * elevationHump;
   }
-  return 0.038;
+  return 0.038 + terrainHeight;
 }
 
 function roadRoughnessAt(layoutIndex, globalZ, progress) {
@@ -648,15 +996,15 @@ function roadChunkRouteLength(seed, chunkIndex, difficulty) {
   const chunkStartZ = chunkIndex * CHUNK_LENGTH;
   let previousZ = chunkStartZ;
   let previousCenter = chunkCenterOffset(seed, previousZ, difficulty)
-    + localRoadOffset(layoutIndex, 0, difficulty);
-  let previousHeight = roadHeightAt(layoutIndex, previousZ, 0);
+    + localRoadOffset(seed, chunkIndex, layoutIndex, 0, difficulty);
+  let previousHeight = roadHeightAt(seed, chunkIndex, layoutIndex, previousZ, 0);
   let routeLength = 0;
   for (let segment = 1; segment <= ROAD_SEGMENTS; segment += 1) {
     const progress = segment / ROAD_SEGMENTS;
     const worldZ = chunkStartZ + progress * CHUNK_LENGTH;
     const center = chunkCenterOffset(seed, worldZ, difficulty)
-      + localRoadOffset(layoutIndex, progress, difficulty);
-    const height = roadHeightAt(layoutIndex, worldZ, progress);
+      + localRoadOffset(seed, chunkIndex, layoutIndex, progress, difficulty);
+    const height = roadHeightAt(seed, chunkIndex, layoutIndex, worldZ, progress);
     routeLength += Math.hypot(
       center - previousCenter,
       height - previousHeight,
@@ -685,15 +1033,15 @@ function roadChunkLocalRouteDistance(
   const segmentProgress = scaledSegment - segmentIndex;
   let previousZ = chunkStartZ;
   let previousCenter = chunkCenterOffset(seed, previousZ, difficulty)
-    + localRoadOffset(layoutIndex, 0, difficulty);
-  let previousHeight = roadHeightAt(layoutIndex, previousZ, 0);
+    + localRoadOffset(seed, chunkIndex, layoutIndex, 0, difficulty);
+  let previousHeight = roadHeightAt(seed, chunkIndex, layoutIndex, previousZ, 0);
   let localDistance = 0;
   for (let segment = 1; segment <= segmentIndex + 1; segment += 1) {
     const progress = segment / ROAD_SEGMENTS;
     const worldZ = chunkStartZ + progress * CHUNK_LENGTH;
     const center = chunkCenterOffset(seed, worldZ, difficulty)
-      + localRoadOffset(layoutIndex, progress, difficulty);
-    const height = roadHeightAt(layoutIndex, worldZ, progress);
+      + localRoadOffset(seed, chunkIndex, layoutIndex, progress, difficulty);
+    const height = roadHeightAt(seed, chunkIndex, layoutIndex, worldZ, progress);
     const segmentLength = Math.hypot(
       center - previousCenter,
       height - previousHeight,
@@ -766,12 +1114,62 @@ function createChunk(slotIndex, obstaclePool) {
     MAX_EVENT_PEOPLE,
     true,
   );
+  const activityAnimals = makeInstanced(
+    geometries.activityAnimal,
+    materials.activityAnimal,
+    MAX_ACTIVITY_ANIMALS,
+    true,
+  );
+  const activityHeads = makeInstanced(
+    geometries.activityHead,
+    materials.clay,
+    MAX_EVENT_PEOPLE,
+    true,
+  );
+  const activityProps = makeInstanced(
+    geometries.box,
+    materials.trunk,
+    MAX_ACTIVITY_PROPS,
+    true,
+  );
+  const activityShelters = makeInstanced(
+    geometries.cone,
+    materials.roofStraw,
+    MAX_ACTIVITY_SHELTERS,
+    true,
+  );
+  const activitySmoke = makeInstanced(
+    geometries.activitySmoke,
+    materials.activitySmoke,
+    MAX_ACTIVITY_SMOKE,
+  );
   const water = new THREE.Mesh(geometries.water, materials.water);
   water.rotation.x = -Math.PI / 2;
   water.visible = false;
   water.receiveShadow = true;
   const villageMeshPool = createMeshPool(12);
   const landmarkMeshPool = createMeshPool(14);
+  const naturalRoadsideMetadata = propMetadata(
+    PROP_CATEGORY_NATURAL,
+    PROP_PLACEMENT_ROADSIDE,
+  );
+  const constructedRoadsideMetadata = propMetadata(
+    PROP_CATEGORY_CONSTRUCTED,
+    PROP_PLACEMENT_ROADSIDE,
+  );
+  grass.userData.propMetadata = naturalRoadsideMetadata;
+  bushes.userData.propMetadata = naturalRoadsideMetadata;
+  rocks.userData.propMetadata = naturalRoadsideMetadata;
+  pots.userData.propMetadata = naturalRoadsideMetadata;
+  roadsideProps.userData.propMetadata = constructedRoadsideMetadata;
+  woodPiles.userData.propMetadata = constructedRoadsideMetadata;
+  signs.userData.propMetadata = constructedRoadsideMetadata;
+  eventPeople.userData.propMetadata = constructedRoadsideMetadata;
+  activityAnimals.userData.propMetadata = naturalRoadsideMetadata;
+  activityHeads.userData.propMetadata = constructedRoadsideMetadata;
+  activityProps.userData.propMetadata = constructedRoadsideMetadata;
+  activityShelters.userData.propMetadata = constructedRoadsideMetadata;
+  activitySmoke.userData.propMetadata = constructedRoadsideMetadata;
 
   group.add(
     ground,
@@ -790,6 +1188,11 @@ function createChunk(slotIndex, obstaclePool) {
     woodPiles,
     signs,
     eventPeople,
+    activityHeads,
+    activityAnimals,
+    activityProps,
+    activityShelters,
+    activitySmoke,
     water,
   );
   for (let index = 0; index < villageMeshPool.length; index += 1) {
@@ -801,7 +1204,15 @@ function createChunk(slotIndex, obstaclePool) {
 
   const obstacleStart = slotIndex * OBSTACLES_PER_CHUNK;
   for (let index = 0; index < OBSTACLES_PER_CHUNK; index += 1) {
-    obstaclePool[obstacleStart + index] = { x: 10000, z: 10000, radius: 0 };
+    obstaclePool[obstacleStart + index] = {
+      x: 10000,
+      z: 10000,
+      radius: 0,
+      category: PROP_CATEGORY_NATURAL,
+      collidable: false,
+      damaging: false,
+      placementContext: PROP_PLACEMENT_ROADSIDE,
+    };
   }
 
   return {
@@ -823,6 +1234,11 @@ function createChunk(slotIndex, obstaclePool) {
     woodPiles,
     signs,
     eventPeople,
+    activityHeads,
+    activityAnimals,
+    activityProps,
+    activityShelters,
+    activitySmoke,
     water,
     villageMeshPool,
     landmarkMeshPool,
@@ -850,11 +1266,21 @@ function createChunk(slotIndex, obstaclePool) {
     fullBushCount: 0,
     fullRockCount: 0,
     fullHouseCount: 0,
+    fullVillageDetailCount: 0,
     fullPropCount: 0,
     fullPotCount: 0,
     fullWoodPileCount: 0,
     fullSignCount: 0,
     fullEventCount: 0,
+    fullActivityAnimalCount: 0,
+    fullActivityPropCount: 0,
+    fullActivityShelterCount: 0,
+    fullActivitySmokeCount: 0,
+    activityPeopleBase: new Float32Array(MAX_EVENT_PEOPLE * 7),
+    activityAnimalsBase: new Float32Array(MAX_ACTIVITY_ANIMALS * 7),
+    activitySmokeBase: new Float32Array(MAX_ACTIVITY_SMOKE * 7),
+    activityType: "None",
+    activityRouteDistance: Number.NaN,
   };
 }
 
@@ -862,6 +1288,11 @@ export class RoadGenerator {
   constructor(seed) {
     this.seed = seed;
     this.scratch = new THREE.Object3D();
+    this.junctionWorldPosition = { x: 0, z: 0 };
+    this.junctionRouteSample = {};
+    this.trackWorldPosition = { x: 0, z: 0 };
+    this.trackRouteSample = {};
+    this.junctionTrackZones = [];
     this.hazardRouteSample = {};
     this.eventRouteSample = {};
     this.previousEventRouteSample = {};
@@ -881,7 +1312,13 @@ export class RoadGenerator {
       const globalZ = startZ + progress * CHUNK_LENGTH;
       const center =
         chunkCenterOffset(this.seed, globalZ, difficulty)
-        + localRoadOffset(layoutIndex, progress, difficulty);
+        + localRoadOffset(
+          this.seed,
+          chunkIndex,
+          layoutIndex,
+          progress,
+          difficulty,
+        );
       const width = roadWidthAt(
         this.seed,
         chunkIndex,
@@ -889,25 +1326,67 @@ export class RoadGenerator {
         progress,
         difficulty,
       );
-      const height = roadHeightAt(layoutIndex, globalZ, progress);
+      this.junctionWorldPosition.z = globalZ;
+      this.getRoutePosition(
+        this.junctionWorldPosition,
+        difficulty,
+        this.junctionRouteSample,
+      );
+      const visualWidth = this.visualRoadWidthAtJunction(
+        this.junctionRouteSample.routeDistance,
+        width,
+      );
+      const height = roadHeightAt(
+        this.seed,
+        chunkIndex,
+        layoutIndex,
+        globalZ,
+        progress,
+      );
       const offset = segment * 6;
-      roadPositions[offset] = center - width * 0.5;
+      roadPositions[offset] = center - visualWidth * 0.5;
       roadPositions[offset + 1] = height;
       roadPositions[offset + 2] = globalZ;
-      roadPositions[offset + 3] = center + width * 0.5;
+      roadPositions[offset + 3] = center + visualWidth * 0.5;
       roadPositions[offset + 4] = height;
       roadPositions[offset + 5] = globalZ;
     }
 
     for (let z = startZ + 2.8; z < startZ + CHUNK_LENGTH - 2; z += trackSpacing) {
+      this.trackWorldPosition.z = z;
+      this.getRoutePosition(
+        this.trackWorldPosition,
+        difficulty,
+        this.trackRouteSample,
+      );
+      let insideJunction = false;
+      for (let index = 0; index < this.junctionTrackZones.length; index += 1) {
+        const zone = this.junctionTrackZones[index];
+        if (
+          this.trackRouteSample.routeDistance >= zone.start
+          && this.trackRouteSample.routeDistance <= zone.end
+        ) {
+          insideJunction = true;
+          break;
+        }
+      }
+      if (insideJunction) continue;
       const progress = (z - startZ) / CHUNK_LENGTH;
       const center =
         chunkCenterOffset(this.seed, z, difficulty)
-        + localRoadOffset(layoutIndex, progress, difficulty);
-      const width = THREE.MathUtils.lerp(
-        boundaryRoadWidth(this.seed, chunkIndex, difficulty),
-        boundaryRoadWidth(this.seed, chunkIndex + 1, difficulty),
-        smoothstep(progress),
+        + localRoadOffset(
+          this.seed,
+          chunkIndex,
+          layoutIndex,
+          progress,
+          difficulty,
+        );
+      const width = roadWidthAt(
+        this.seed,
+        chunkIndex,
+        layoutIndex,
+        progress,
+        difficulty,
       );
       for (let side = -1; side <= 1; side += 2) {
         setTransform(
@@ -929,15 +1408,82 @@ export class RoadGenerator {
     chunk.layout = ROAD_LAYOUTS[layoutIndex];
     chunk.roadCenter =
       chunkCenterOffset(this.seed, startZ + CHUNK_LENGTH * 0.5, difficulty)
-      + localRoadOffset(layoutIndex, 0.5, difficulty);
-    chunk.roadWidth =
-      (
-        boundaryRoadWidth(this.seed, chunkIndex, difficulty)
-        + boundaryRoadWidth(this.seed, chunkIndex + 1, difficulty)
-      ) * 0.5
-      + (layoutIndex === 5 ? -2.6 : layoutIndex === 6 ? 3.1 : 0);
+      + localRoadOffset(
+        this.seed,
+        chunkIndex,
+        layoutIndex,
+        0.5,
+        difficulty,
+      );
+    chunk.roadWidth = roadWidthAt(
+      this.seed,
+      chunkIndex,
+      layoutIndex,
+      0.5,
+      difficulty,
+    );
     finalizeInstances(chunk.tracks, Math.min(trackIndex, trackCount));
     prepareDynamicGeometry(chunk.road);
+  }
+
+  setJunctionTrackZones(junctions, count) {
+    this.junctionTrackZones.length = count;
+    for (let index = 0; index < count; index += 1) {
+      const descriptor = junctions[index];
+      const routeDistance = descriptor.routeDistance;
+      const correctRoute = descriptor.outgoingRoutes.find(
+        (route) => route.id === descriptor.correctOutgoingRouteId,
+      );
+      const graphStart = routeDistance - ROUTE_FORK_APPROACH_DISTANCE;
+      const graphEnd = correctRoute.continuationEndRouteDistance;
+      this.junctionTrackZones[index] = {
+        routeDistance,
+        start: graphStart,
+        end: graphEnd + 8,
+        graphStart,
+        graphEnd,
+      };
+    }
+  }
+
+  isInsideJunctionZone(routeDistance, padding = 0) {
+    for (let index = 0; index < this.junctionTrackZones.length; index += 1) {
+      const zone = this.junctionTrackZones[index];
+      if (
+        routeDistance >= zone.start - padding
+        && routeDistance <= zone.end + padding
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  visualRoadWidthAtJunction(routeDistance, width) {
+    for (let index = 0; index < this.junctionTrackZones.length; index += 1) {
+      const zone = this.junctionTrackZones[index];
+      if (
+        routeDistance < zone.start
+        || routeDistance > zone.end
+      ) {
+        continue;
+      }
+      const entryProgress = THREE.MathUtils.clamp(
+        (routeDistance - zone.graphStart) / 8,
+        0,
+        1,
+      );
+      const exitProgress = THREE.MathUtils.clamp(
+        (routeDistance - zone.graphEnd) / 8,
+        0,
+        1,
+      );
+      const entryFactor = 1 - smoothstep(entryProgress);
+      const exitFactor = smoothstep(exitProgress);
+      const factor = Math.max(entryFactor, exitFactor);
+      return width * factor;
+    }
+    return width;
   }
 
   sampleRoadCenter(chunkIndex, worldZ, difficulty) {
@@ -949,7 +1495,13 @@ export class RoadGenerator {
     const layoutIndex = roadLayoutIndexFor(this.seed, chunkIndex, difficulty);
     return (
       chunkCenterOffset(this.seed, worldZ, difficulty)
-      + localRoadOffset(layoutIndex, progress, difficulty)
+      + localRoadOffset(
+        this.seed,
+        chunkIndex,
+        layoutIndex,
+        progress,
+        difficulty,
+      )
     );
   }
 
@@ -967,11 +1519,35 @@ export class RoadGenerator {
     const endZ = chunkStartZ + endProgress * CHUNK_LENGTH;
     const layoutIndex = roadLayoutIndexFor(this.seed, chunkIndex, difficulty);
     const startCenter = chunkCenterOffset(this.seed, startZ, difficulty)
-      + localRoadOffset(layoutIndex, startProgress, difficulty);
+      + localRoadOffset(
+        this.seed,
+        chunkIndex,
+        layoutIndex,
+        startProgress,
+        difficulty,
+      );
     const endCenter = chunkCenterOffset(this.seed, endZ, difficulty)
-      + localRoadOffset(layoutIndex, endProgress, difficulty);
-    const startHeight = roadHeightAt(layoutIndex, startZ, startProgress);
-    const endHeight = roadHeightAt(layoutIndex, endZ, endProgress);
+      + localRoadOffset(
+        this.seed,
+        chunkIndex,
+        layoutIndex,
+        endProgress,
+        difficulty,
+      );
+    const startHeight = roadHeightAt(
+      this.seed,
+      chunkIndex,
+      layoutIndex,
+      startZ,
+      startProgress,
+    );
+    const endHeight = roadHeightAt(
+      this.seed,
+      chunkIndex,
+      layoutIndex,
+      endZ,
+      endProgress,
+    );
     const centerX = THREE.MathUtils.lerp(startCenter, endCenter, segmentProgress);
     const width = THREE.MathUtils.lerp(
       roadWidthAt(this.seed, chunkIndex, layoutIndex, startProgress, difficulty),
@@ -988,10 +1564,13 @@ export class RoadGenerator {
 
     target.chunkIndex = chunkIndex;
     target.centerX = centerX;
+    target.centerZ = worldZ;
     target.width = width;
     target.height = height;
     target.tangentX = tangentDeltaX / tangentLength;
     target.tangentZ = tangentDeltaZ / tangentLength;
+    target.normalX = target.tangentZ;
+    target.normalZ = -target.tangentX;
     target.slope = (endHeight - startHeight) / tangentLength;
     target.roughness = roadRoughnessAt(layoutIndex, worldZ, chunkProgress);
     target.normalizedOffset = signedOffset / (width * 0.5);
@@ -1095,8 +1674,20 @@ export class RoadGenerator {
       this.seed,
       previousZ,
       difficulty,
-    ) + localRoadOffset(layoutIndex, 0, difficulty);
-    let previousHeight = roadHeightAt(layoutIndex, previousZ, 0);
+    ) + localRoadOffset(
+      this.seed,
+      chunkIndex,
+      layoutIndex,
+      0,
+      difficulty,
+    );
+    let previousHeight = roadHeightAt(
+      this.seed,
+      chunkIndex,
+      layoutIndex,
+      previousZ,
+      0,
+    );
     let accumulatedDistance = 0;
     let centerX = previousCenter;
     let centerY = previousHeight;
@@ -1116,8 +1707,20 @@ export class RoadGenerator {
       const progress = segment / ROAD_SEGMENTS;
       const worldZ = chunkStartZ + progress * CHUNK_LENGTH;
       const center = chunkCenterOffset(this.seed, worldZ, difficulty)
-        + localRoadOffset(layoutIndex, progress, difficulty);
-      const height = roadHeightAt(layoutIndex, worldZ, progress);
+        + localRoadOffset(
+          this.seed,
+          chunkIndex,
+          layoutIndex,
+          progress,
+          difficulty,
+        );
+      const height = roadHeightAt(
+        this.seed,
+        chunkIndex,
+        layoutIndex,
+        worldZ,
+        progress,
+      );
       const deltaX = center - previousCenter;
       const deltaY = height - previousHeight;
       const deltaZ = worldZ - previousZ;
@@ -1246,7 +1849,11 @@ export class RoadGenerator {
         }
       }
 
-      if (checkpointClear && routeDistance < finalRouteDistance) {
+      if (
+        checkpointClear
+        && routeDistance < finalRouteDistance
+        && !this.isInsideJunctionZone(routeDistance, 4)
+      ) {
         const descriptor = targetHazards[hazardCount];
         const sample = this.sampleRouteDistance(
           routeDistance,
@@ -1488,7 +2095,10 @@ export class RoadGenerator {
       else if (type === EVENT_MARKET_SPILL) length = 8;
       else if (type === EVENT_WATER_PUDDLE) length = 6;
 
-      let placementClear = routeDistance < finalRouteDistance;
+      let placementClear = (
+        routeDistance < finalRouteDistance
+        && !this.isInsideJunctionZone(routeDistance, length * 0.5 + 4)
+      );
       for (
         let checkpointIndex = 0;
         placementClear && checkpointIndex < checkpointStates.length;
@@ -1587,6 +2197,14 @@ export class RoadGenerator {
     );
     const startRouteId = `route-${missionSalt}-start`;
     let incomingRouteId = startRouteId;
+    let incomingOffset = 0;
+    const junctionRouteDistances = junctionCount === 2
+      ? [targetRouteDistance - 340, targetRouteDistance - 150]
+      : [
+        targetRouteDistance - 430,
+        targetRouteDistance - 280,
+        targetRouteDistance - 130,
+      ];
 
     targetMissionRoute.destinationVillageName = destinationVillageName;
     targetMissionRoute.startRouteId = startRouteId;
@@ -1612,20 +2230,17 @@ export class RoadGenerator {
           : typeIndex === 2
             ? JUNCTION_STRAIGHT_RIGHT
             : JUNCTION_THREE_WAY;
-      const routeDistance = junctionCount === 2
-        ? targetRouteDistance - (index === 0 ? 365 : 165)
-        : targetRouteDistance - (
-          index === 0 ? 365 : index === 1 ? 265 : 165
-        );
+      const routeDistance = junctionRouteDistances[index];
       const id = `junction-${missionSalt}-${index}`;
 
       descriptor.id = id;
       descriptor.type = type;
       descriptor.routeDistance = routeDistance;
       descriptor.incomingRouteId = incomingRouteId;
+      descriptor.incomingOffset = incomingOffset;
       descriptor.destinationVillageName = destinationVillageName;
       descriptor.villagerSpawnRouteDistance = routeDistance - 5;
-      descriptor.wrongVillagerSpawnRouteDistance = routeDistance + 22;
+      descriptor.wrongVillagerSpawnRouteDistance = routeDistance + 68;
       descriptor.outgoingRoutes.length = 0;
 
       if (
@@ -1665,12 +2280,92 @@ export class RoadGenerator {
         919,
       ) % descriptor.outgoingRoutes.length;
       const correctRoute = descriptor.outgoingRoutes[correctIndex];
+      for (
+        let routeIndex = 0;
+        routeIndex < descriptor.outgoingRoutes.length;
+        routeIndex += 1
+      ) {
+        const route = descriptor.outgoingRoutes[routeIndex];
+        const directionSign = route.direction === "LEFT"
+          ? 1
+          : route.direction === "RIGHT" ? -1 : 0;
+        const lateralSeparation = directionSign === 0
+          ? 0
+          : 18 + hash01(
+            this.seed,
+            deterministicIndex,
+            930 + routeIndex,
+          ) * 6;
+        const angleDegrees = directionSign === 0
+          ? 0
+          : 28 + hash01(
+            this.seed,
+            deterministicIndex,
+            940 + routeIndex,
+          ) * 12;
+        const divergenceLength = directionSign === 0
+          ? 34
+          : THREE.MathUtils.clamp(
+            1.5 * lateralSeparation / Math.tan(THREE.MathUtils.degToRad(angleDegrees)),
+            34,
+            52,
+          );
+        const separationDistance = (
+          ROUTE_FORK_MIN_SEPARATION_DISTANCE
+          + (hashUint(this.seed, deterministicIndex, 950 + routeIndex) % 19)
+        );
+        route.incomingRouteId = incomingRouteId;
+        route.startRouteDistance = routeDistance;
+        route.divergenceStartRouteDistance = routeDistance + 2;
+        route.divergenceLength = divergenceLength;
+        route.incomingOffset = incomingOffset;
+        route.outgoingOffset = incomingOffset + directionSign * lateralSeparation;
+        route.separationDistance = separationDistance;
+        route.endRouteDistance = routeDistance + separationDistance;
+        route.continuationEndRouteDistance = route.endRouteDistance;
+        route.branchAngleDegrees = angleDegrees * directionSign;
+        route.width = 5.8 + hash01(
+          this.seed,
+          deterministicIndex,
+          960 + routeIndex,
+        ) * 0.6;
+        route.junctionWidth = 9 + hash01(
+          this.seed,
+          deterministicIndex,
+          970 + routeIndex,
+        ) * 0.8;
+        route.turnaroundAreaId = `${route.id}-turnaround`;
+        route.turnaroundWidth = TURNAROUND_USABLE_WIDTH;
+        route.turnaroundLength = TURNAROUND_USABLE_LENGTH;
+        route.isCorrect = route === correctRoute;
+        route.recovery = route.isCorrect ? "continue" : "turnaround";
+      }
       descriptor.correctOutgoingRouteId = correctRoute.id;
       descriptor.correctDirection = correctRoute.direction;
+      descriptor.branchSeparationDistance = correctRoute.separationDistance;
       descriptor.chunkIndex = Math.floor(routeDistance / CHUNK_LENGTH);
       descriptor.active = true;
       targetMissionRoute.correctRouteIds[index + 1] = correctRoute.id;
       incomingRouteId = correctRoute.id;
+      incomingOffset = correctRoute.outgoingOffset;
+    }
+
+    for (let index = 0; index < junctionCount; index += 1) {
+      const descriptor = targetJunctions[index];
+      const continuationEndRouteDistance = index + 1 < junctionCount
+        ? targetJunctions[index + 1].routeDistance - ROUTE_FORK_APPROACH_DISTANCE
+        : targetRouteDistance + 24;
+      for (
+        let routeIndex = 0;
+        routeIndex < descriptor.outgoingRoutes.length;
+        routeIndex += 1
+      ) {
+        const route = descriptor.outgoingRoutes[routeIndex];
+        route.continuationEndRouteDistance = route.isCorrect
+          ? continuationEndRouteDistance
+          : route.endRouteDistance;
+        if (route.isCorrect) route.endRouteDistance = continuationEndRouteDistance;
+      }
     }
 
     for (
@@ -1686,14 +2381,49 @@ export class RoadGenerator {
 }
 
 export class EnvironmentGenerator {
-  constructor(seed, obstaclePool) {
+  constructor(seed, obstaclePool, roadGenerator) {
     this.seed = seed;
     this.obstaclePool = obstaclePool;
+    this.roadGenerator = roadGenerator;
     this.scratch = new THREE.Object3D();
+    this.roadsideWorldPosition = { x: 0, z: 0 };
+    this.roadsideRouteSample = {};
   }
 
-  fillGround(chunk, chunkIndex) {
+  roadsidePlacement(z, difficulty, side, randomOffset, target) {
+    this.roadsideWorldPosition.z = z;
+    const sample = this.roadGenerator.getRoutePosition(
+      this.roadsideWorldPosition,
+      difficulty,
+      this.roadsideRouteSample,
+    );
+    for (
+      let index = 0;
+      index < this.roadGenerator.junctionTrackZones.length;
+      index += 1
+    ) {
+      const zone = this.roadGenerator.junctionTrackZones[index];
+      if (sample.routeDistance >= zone.start && sample.routeDistance <= zone.end) {
+        return false;
+      }
+    }
+    target.x = (
+      sample.centerX
+      + side * (
+        sample.width * 0.5
+        + SURFACE_SHOULDER_WIDTH
+        + ROADSIDE_SAFETY_MARGIN
+        + randomOffset
+      )
+    );
+    target.y = sample.height;
+    target.z = z;
+    return true;
+  }
+
+  fillGround(chunk, chunkIndex, difficulty) {
     const startZ = chunkIndex * CHUNK_LENGTH;
+    const layoutIndex = roadLayoutIndexFor(this.seed, chunkIndex, difficulty);
     const previousTheme = THEME_DEFINITIONS[themeIndexFor(this.seed, chunkIndex - 1)];
     const currentTheme = THEME_DEFINITIONS[themeIndexFor(this.seed, chunkIndex)];
     const nextTheme = THEME_DEFINITIONS[themeIndexFor(this.seed, chunkIndex + 1)];
@@ -1701,13 +2431,21 @@ export class EnvironmentGenerator {
     const colors = chunk.ground.geometry.attributes.color.array;
     for (let segment = 0; segment <= GROUND_SEGMENTS; segment += 1) {
       const progress = segment / GROUND_SEGMENTS;
+      const globalZ = startZ + progress * CHUNK_LENGTH;
+      const groundHeight = roadHeightAt(
+        this.seed,
+        chunkIndex,
+        layoutIndex,
+        globalZ,
+        progress,
+      ) - 0.055;
       const offset = segment * 6;
       positions[offset] = -WORLD_HALF_WIDTH;
-      positions[offset + 1] = 0;
-      positions[offset + 2] = startZ + progress * CHUNK_LENGTH;
+      positions[offset + 1] = groundHeight;
+      positions[offset + 2] = globalZ;
       positions[offset + 3] = WORLD_HALF_WIDTH;
-      positions[offset + 4] = 0;
-      positions[offset + 5] = startZ + progress * CHUNK_LENGTH;
+      positions[offset + 4] = groundHeight;
+      positions[offset + 5] = globalZ;
       if (progress < 0.5) {
         sharedColorA.setHex(previousTheme.color);
         sharedColorB.setHex(currentTheme.color);
@@ -1730,63 +2468,67 @@ export class EnvironmentGenerator {
   configureTrees(chunk, chunkIndex, difficulty, theme, regionDefinition) {
     const count = Math.min(
       MAX_TREES,
-      Math.max(1, Math.round(theme.trees * regionDefinition.treeFactor)),
+      Math.max(8, Math.round(theme.trees * regionDefinition.treeFactor)),
     );
+    const startZ = chunkIndex * CHUNK_LENGTH;
+    const placement = { x: 0, y: 0, z: 0 };
+    let placedCount = 0;
     for (let index = 0; index < count; index += 1) {
       const side = index % 2 ? 1 : -1;
-      const x =
-        side * (16 + hash01(this.seed, chunkIndex, 200 + index) * 74);
       const z =
-        chunkIndex * CHUNK_LENGTH
-        + 4
-        + hash01(this.seed, chunkIndex, 260 + index) * (CHUNK_LENGTH - 8);
+        startZ + 8 + hash01(this.seed, chunkIndex, 260 + index) * (CHUNK_LENGTH - 16);
+      const sightlineTree = index < Math.min(count, 10);
+      const extraOffset = sightlineTree
+        ? 2.5 + hash01(this.seed, chunkIndex, 200 + index) * 8
+        : 11 + hash01(this.seed, chunkIndex, 200 + index) * 57;
+      if (!this.roadsidePlacement(z, difficulty, side, extraOffset, placement)) {
+        continue;
+      }
       const scale = 0.72 + hash01(this.seed, chunkIndex, 320 + index) * 0.85;
-      setTransform(this.scratch, x, 1.6 * scale, z, 0, scale, scale, scale);
-      chunk.treeTrunks.setMatrixAt(index, this.scratch.matrix);
       setTransform(
         this.scratch,
-        x,
-        4.1 * scale,
+        placement.x,
+        placement.y + 1.6 * scale,
+        z,
+        0,
+        scale,
+        scale,
+        scale,
+      );
+      chunk.treeTrunks.setMatrixAt(placedCount, this.scratch.matrix);
+      setTransform(
+        this.scratch,
+        placement.x,
+        placement.y + 4.1 * scale,
         z,
         hash01(this.seed, chunkIndex, 380 + index) * Math.PI,
         scale,
         scale,
         scale,
       );
-      chunk.treeCrowns.setMatrixAt(index, this.scratch.matrix);
-      const treeRoadCenter = (
-        chunkCenterOffset(this.seed, z, difficulty)
-        + localRoadOffset(
-          roadLayoutIndexFor(this.seed, chunkIndex, difficulty),
-          (z - chunkIndex * CHUNK_LENGTH) / CHUNK_LENGTH,
-          difficulty,
-        )
-      );
-      const treeRoadWidth = roadWidthAt(
-        this.seed,
-        chunkIndex,
-        roadLayoutIndexFor(this.seed, chunkIndex, difficulty),
-        (z - chunkIndex * CHUNK_LENGTH) / CHUNK_LENGTH,
-        difficulty,
-      );
-      if (
-        index < OBSTACLES_PER_CHUNK
-        && Math.abs(x - treeRoadCenter) > treeRoadWidth * 0.5 + 3
-        && Math.abs(x) < 29
-      ) {
-        const obstacle = this.obstaclePool[chunk.obstacleStart + index];
-        obstacle.x = x;
+      chunk.treeCrowns.setMatrixAt(placedCount, this.scratch.matrix);
+      if (placedCount < OBSTACLES_PER_CHUNK && Math.abs(placement.x) < 34) {
+        const obstacle = this.obstaclePool[chunk.obstacleStart + placedCount];
+        obstacle.x = placement.x;
         obstacle.z = z;
         obstacle.radius = 1.25 * scale;
       }
+      placedCount += 1;
     }
     chunk.treeCrowns.material = theme.name === "Small Forest" ? materials.leaf : materials.leafLight;
-    chunk.fullTreeCount = count;
-    finalizeInstances(chunk.treeTrunks, count);
-    finalizeInstances(chunk.treeCrowns, count);
+    chunk.fullTreeCount = placedCount;
+    finalizeInstances(chunk.treeTrunks, placedCount);
+    finalizeInstances(chunk.treeCrowns, placedCount);
   }
 
-  configureCrops(chunk, chunkIndex, themeIndex, theme, regionDefinition) {
+  configureCrops(
+    chunk,
+    chunkIndex,
+    difficulty,
+    themeIndex,
+    theme,
+    regionDefinition,
+  ) {
     const count = Math.min(
       MAX_CROPS,
       Math.max(0, Math.round(theme.crops * regionDefinition.cropFactor)),
@@ -1795,15 +2537,34 @@ export class EnvironmentGenerator {
       const side = index % 2 ? 1 : -1;
       const lane = Math.floor(index / 2) % 9;
       const row = Math.floor(index / 18);
-      const x =
-        side * (18 + lane * 2.15 + hash01(this.seed, chunkIndex, 430 + index) * 0.5);
       const z =
         chunkIndex * CHUNK_LENGTH
         + 5
         + row * 8.4
         + hash01(this.seed, chunkIndex, 500 + index) * 1.2;
+      this.roadsideWorldPosition.z = z;
+      const sample = this.roadGenerator.sampleRoad(
+        this.roadsideWorldPosition,
+        difficulty,
+        this.roadsideRouteSample,
+      );
+      const x = sample.centerX + side * (
+        sample.width * 0.5
+        + 6.5
+        + lane * 2.15
+        + hash01(this.seed, chunkIndex, 430 + index) * 0.5
+      );
       const scale = 0.78 + hash01(this.seed, chunkIndex, 570 + index) * 0.42;
-      setTransform(this.scratch, x, 0.38 * scale, z, 0, scale, scale, scale);
+      setTransform(
+        this.scratch,
+        x,
+        sample.height + 0.38 * scale,
+        z,
+        0,
+        scale,
+        scale,
+        scale,
+      );
       chunk.crops.setMatrixAt(index, this.scratch.matrix);
     }
     chunk.crops.material = materials.crop[themeIndex];
@@ -1825,118 +2586,149 @@ export class EnvironmentGenerator {
       MAX_ROCKS,
       Math.round((8 + (hashUint(this.seed, chunkIndex, 622) % 10)) * regionDefinition.rockFactor),
     );
-    const propCount = Math.min(
-      MAX_ROADSIDE_PROPS,
-      8 + (hashUint(this.seed, chunkIndex, 623) % 14)
-        + (regionType === "Farming" ? 3 : 0),
-    );
     const potCount = Math.min(
       MAX_POTS,
       2 + (hashUint(this.seed, chunkIndex, 624) % 5)
         + (regionType === "Riverside" ? 2 : 0),
     );
-    const woodPileCount = Math.min(
-      MAX_WOOD_PILES,
-      2 + (hashUint(this.seed, chunkIndex, 625) % 5)
-        + (regionType === "Forest" ? 2 : 0),
-    );
-    const signCount = 1 + (hashUint(this.seed, chunkIndex, 626) % 3);
     const startZ = chunkIndex * CHUNK_LENGTH;
+    const placement = { x: 0, y: 0, z: 0 };
+    const occupiedLargeProps = [];
+    const reserveLargeProp = (x, z, clearance) => {
+      for (let index = 0; index < occupiedLargeProps.length; index += 1) {
+        const occupied = occupiedLargeProps[index];
+        const dx = x - occupied.x;
+        const dz = z - occupied.z;
+        const minimumDistance = clearance + occupied.clearance;
+        if (dx * dx + dz * dz < minimumDistance * minimumDistance) return false;
+      }
+      occupiedLargeProps.push({ x, z, clearance });
+      return true;
+    };
 
+    let placedGrassCount = 0;
     for (let index = 0; index < grassCount; index += 1) {
       const side = index % 2 ? 1 : -1;
-      const x = side * (9.5 + hash01(this.seed, chunkIndex, 700 + index) * 11);
       const z = startZ + hash01(this.seed, chunkIndex, 780 + index) * CHUNK_LENGTH;
+      if (!this.roadsidePlacement(
+        z,
+        difficulty,
+        side,
+        hash01(this.seed, chunkIndex, 700 + index) * 11,
+        placement,
+      )) continue;
       const scale = 0.65 + hash01(this.seed, chunkIndex, 860 + index) * 0.8;
-      setTransform(this.scratch, x, 0.3 * scale, z, 0, scale, scale, scale);
-      chunk.grass.setMatrixAt(index, this.scratch.matrix);
+      setTransform(
+        this.scratch,
+        placement.x,
+        placement.y + 0.3 * scale,
+        placement.z,
+        0,
+        scale,
+        scale,
+        scale,
+      );
+      chunk.grass.setMatrixAt(placedGrassCount, this.scratch.matrix);
+      placedGrassCount += 1;
     }
+    let placedBushCount = 0;
     for (let index = 0; index < bushCount; index += 1) {
       const side = index % 2 ? 1 : -1;
-      const x = side * (11 + hash01(this.seed, chunkIndex, 940 + index) * 16);
       const z = startZ + hash01(this.seed, chunkIndex, 1000 + index) * CHUNK_LENGTH;
+      if (!this.roadsidePlacement(
+        z,
+        difficulty,
+        side,
+        hash01(this.seed, chunkIndex, 940 + index) * 16,
+        placement,
+      )) continue;
       const scale = 0.6 + hash01(this.seed, chunkIndex, 1060 + index) * 0.7;
-      setTransform(this.scratch, x, 0.45 * scale, z, 0, scale, scale, scale);
-      chunk.bushes.setMatrixAt(index, this.scratch.matrix);
+      if (!reserveLargeProp(placement.x, placement.z, scale * 0.85)) continue;
+      setTransform(
+        this.scratch,
+        placement.x,
+        placement.y + 0.45 * scale,
+        placement.z,
+        0,
+        scale,
+        scale,
+        scale,
+      );
+      chunk.bushes.setMatrixAt(placedBushCount, this.scratch.matrix);
+      placedBushCount += 1;
     }
+    let placedRockCount = 0;
     for (let index = 0; index < rockCount; index += 1) {
       const side = index % 2 ? 1 : -1;
-      const safeMargin = 10.5 - Math.min(1.5, difficulty * 0.12);
       const rockyCliff = regionType === "Rocky Area" && index < 5;
-      const x = rockyCliff
-        ? side * (24 + hash01(this.seed, chunkIndex, 1120 + index) * 12)
-        : side * (safeMargin + hash01(this.seed, chunkIndex, 1120 + index) * 16);
       const z = startZ + hash01(this.seed, chunkIndex, 1180 + index) * CHUNK_LENGTH;
+      if (!this.roadsidePlacement(
+        z,
+        difficulty,
+        side,
+        (rockyCliff ? 11 : 0) + hash01(this.seed, chunkIndex, 1120 + index) * 16,
+        placement,
+      )) continue;
       const scale = (
         0.5 + hash01(this.seed, chunkIndex, 1240 + index) * 0.9
       ) * (rockyCliff ? 2.7 : 1);
+      if (!reserveLargeProp(placement.x, placement.z, scale * 0.75)) continue;
       setTransform(
         this.scratch,
-        x,
-        0.24 * scale,
-        z,
+        placement.x,
+        placement.y + 0.24 * scale,
+        placement.z,
         hash01(this.seed, chunkIndex, 1300 + index) * Math.PI,
         scale,
         scale * 0.72,
         scale,
       );
-      chunk.rocks.setMatrixAt(index, this.scratch.matrix);
+      chunk.rocks.setMatrixAt(placedRockCount, this.scratch.matrix);
+      placedRockCount += 1;
     }
-    let placedPropCount = 0;
-    for (let index = 0; index < propCount; index += 1) {
-      const side = index % 2 ? 1 : -1;
-      const x = side * (11.5 + hash01(this.seed, chunkIndex, 1360 + index) * 8);
-      const z = startZ + 2 + hash01(this.seed, chunkIndex, 1420 + index) * (CHUNK_LENGTH - 4);
-      const type = hashUint(this.seed, chunkIndex, 1480 + index) % 5;
-      if (type !== 1) continue;
-      const sx = type === 0 ? 0.32 : type === 1 ? 1.8 : type === 2 ? 0.8 : 0.55;
-      const sy = type === 0 ? 1.6 : type === 1 ? 0.18 : type === 2 ? 0.65 : 0.85;
-      const sz = type === 0 ? 1 : type === 1 ? 2.2 : type === 2 ? 0.8 : 1.2;
-      setTransform(this.scratch, x, sy * 0.5, z, 0, sx, sy, sz);
-      chunk.roadsideProps.setMatrixAt(placedPropCount, this.scratch.matrix);
-      placedPropCount += 1;
-    }
+    let placedPotCount = 0;
     for (let index = 0; index < potCount; index += 1) {
       const side = index % 2 ? 1 : -1;
-      const x = side * (11.2 + hash01(this.seed, chunkIndex, 1520 + index) * 6);
       const z = startZ + 6 + hash01(this.seed, chunkIndex, 1530 + index) * (CHUNK_LENGTH - 12);
+      if (!this.roadsidePlacement(
+        z,
+        difficulty,
+        side,
+        hash01(this.seed, chunkIndex, 1520 + index) * 6,
+        placement,
+      )) continue;
       const scale = 0.52 + hash01(this.seed, chunkIndex, 1540 + index) * 0.25;
-      setTransform(this.scratch, x, 0.4 * scale, z, 0, scale, scale * 1.18, scale);
-      chunk.pots.setMatrixAt(index, this.scratch.matrix);
+      if (!reserveLargeProp(placement.x, placement.z, scale * 0.75)) continue;
+      setTransform(
+        this.scratch,
+        placement.x,
+        placement.y + 0.4 * scale,
+        placement.z,
+        0,
+        scale,
+        scale * 1.18,
+        scale,
+      );
+      chunk.pots.setMatrixAt(placedPotCount, this.scratch.matrix);
+      placedPotCount += 1;
     }
-    for (let index = 0; index < woodPileCount; index += 1) {
-      const side = index % 2 ? 1 : -1;
-      const x = side * (13 + hash01(this.seed, chunkIndex, 1550 + index) * 7);
-      const z = startZ + 5 + hash01(this.seed, chunkIndex, 1560 + index) * (CHUNK_LENGTH - 10);
-      setTransform(this.scratch, x, 0.42, z, index * 0.34, 1.8, 0.85, 1.1);
-      chunk.woodPiles.setMatrixAt(index, this.scratch.matrix);
-    }
-    for (let index = 0; index < signCount; index += 1) {
-      const side = index % 2 ? 1 : -1;
-      const x = side * (10.8 + hash01(this.seed, chunkIndex, 1570 + index) * 3);
-      const z = startZ + 12 + hash01(this.seed, chunkIndex, 1580 + index) * (CHUNK_LENGTH - 24);
-      setTransform(this.scratch, x, 1.7, z, side * -0.12, 1.8, 0.7, 0.15);
-      chunk.signs.setMatrixAt(index, this.scratch.matrix);
-    }
-    chunk.fullGrassCount = grassCount;
-    chunk.fullBushCount = bushCount;
-    chunk.fullRockCount = rockCount;
-    chunk.fullPropCount = placedPropCount;
-    chunk.fullPotCount = potCount;
-    chunk.fullWoodPileCount = woodPileCount;
-    chunk.fullSignCount = signCount;
-    chunk.roadsideProps.material = regionType === "Farming"
-      ? materials.hay
-      : regionType === "Riverside"
-        ? materials.clay
-        : regionType === "Rocky Area" ? materials.rock : materials.trunk;
-    finalizeInstances(chunk.grass, grassCount);
-    finalizeInstances(chunk.bushes, bushCount);
-    finalizeInstances(chunk.rocks, rockCount);
-    finalizeInstances(chunk.roadsideProps, placedPropCount);
-    finalizeInstances(chunk.pots, potCount);
-    finalizeInstances(chunk.woodPiles, woodPileCount);
-    finalizeInstances(chunk.signs, signCount);
+    // Generic constructed boxes, bare sign boards, and open-road wood piles were
+    // the source of standalone barriers. Constructed props now come only from
+    // contextual village, entrance, bridge, and event generators.
+    chunk.fullGrassCount = placedGrassCount;
+    chunk.fullBushCount = placedBushCount;
+    chunk.fullRockCount = placedRockCount;
+    chunk.fullPropCount = 0;
+    chunk.fullPotCount = placedPotCount;
+    chunk.fullWoodPileCount = 0;
+    chunk.fullSignCount = 0;
+    finalizeInstances(chunk.grass, placedGrassCount);
+    finalizeInstances(chunk.bushes, placedBushCount);
+    finalizeInstances(chunk.rocks, placedRockCount);
+    finalizeInstances(chunk.roadsideProps, 0);
+    finalizeInstances(chunk.pots, placedPotCount);
+    finalizeInstances(chunk.woodPiles, 0);
+    finalizeInstances(chunk.signs, 0);
   }
 
   configureWater(chunk, chunkIndex, themeIndex, regionType) {
@@ -1955,47 +2747,526 @@ export class EnvironmentGenerator {
     }
   }
 
-  configureWorldEvent(chunk, chunkIndex, difficulty, regionType) {
-    const cadence = Math.max(9, 14 - Math.floor(difficulty * 0.55));
-    const eventSlot = hashUint(this.seed, 0, 1601) % cadence;
-    const hasEvent = ((chunkIndex % cadence) + cadence) % cadence === eventSlot;
-    if (!hasEvent) {
+  configureWorldEvent(
+    chunk,
+    chunkIndex,
+    difficulty,
+    regionType,
+    themeIndex,
+  ) {
+    const startZ = chunkIndex * CHUNK_LENGTH;
+    const phase = hashUint(this.seed, 0, 1600) % AMBIENT_ACTIVITY_SPACING;
+    const slot = Math.ceil(
+      (startZ + AMBIENT_ACTIVITY_EDGE_CLEARANCE - phase)
+      / AMBIENT_ACTIVITY_SPACING,
+    );
+    const activityZ = phase + slot * AMBIENT_ACTIVITY_SPACING;
+    const endZ = startZ + CHUNK_LENGTH - AMBIENT_ACTIVITY_EDGE_CLEARANCE;
+    const placement = { x: 0, z: 0 };
+    let side = hash01(this.seed, slot, 1603) > 0.5 ? 1 : -1;
+    if (regionType === "Riverside") {
+      side = hash01(this.seed, chunkIndex, 1510) > 0.5 ? 1 : -1;
+    }
+    const randomOffset = 4 + hash01(this.seed, slot, 1604) * 4;
+    const hasPlacement = (
+      activityZ <= endZ
+      && this.roadsidePlacement(
+        activityZ,
+        difficulty,
+        side,
+        randomOffset,
+        placement,
+      )
+    );
+    if (!hasPlacement) {
       chunk.event = "None";
+      chunk.activityType = "None";
+      chunk.activityRouteDistance = Number.NaN;
       chunk.fullEventCount = 0;
+      chunk.fullActivityAnimalCount = 0;
+      chunk.fullActivityPropCount = 0;
+      chunk.fullActivityShelterCount = 0;
+      chunk.fullActivitySmokeCount = 0;
       finalizeInstances(chunk.eventPeople, 0);
+      finalizeInstances(chunk.activityHeads, 0);
+      finalizeInstances(chunk.activityAnimals, 0);
+      finalizeInstances(chunk.activityProps, 0);
+      finalizeInstances(chunk.activityShelters, 0);
+      finalizeInstances(chunk.activitySmoke, 0);
       return;
     }
-    const sequence = Math.floor(chunkIndex / cadence);
-    const eventIndex = (
-      sequence + (hashUint(this.seed, 0, 1602) % WORLD_EVENTS.length)
-    ) % WORLD_EVENTS.length;
-    const normalizedEventIndex = eventIndex < 0 ? eventIndex + WORLD_EVENTS.length : eventIndex;
-    const count =
-      normalizedEventIndex === 5
-        ? 18
-        : normalizedEventIndex === 0
-          ? 14
-          : 8 + normalizedEventIndex;
-    const side = hash01(this.seed, chunkIndex, 1603) > 0.5 ? 1 : -1;
-    for (let index = 0; index < count; index += 1) {
-      const x = side * (13.5 + (index % 5) * 0.9);
-      const z = chunkIndex * CHUNK_LENGTH + 23 + Math.floor(index / 5) * 2.1;
-      const scale =
-        normalizedEventIndex === 2 && index > count / 2
-          ? 0.56
-          : 0.82 + (index % 3) * 0.08;
-      setTransform(this.scratch, x, 0.62 * scale, z, 0, scale, scale, scale);
-      chunk.eventPeople.setMatrixAt(index, this.scratch.matrix);
+
+    const sample = this.roadsideRouteSample;
+    let nearJunction = false;
+    for (
+      let index = 0;
+      index < this.roadGenerator.junctionTrackZones.length;
+      index += 1
+    ) {
+      const zone = this.roadGenerator.junctionTrackZones[index];
+      const distanceToZone = Math.min(
+        Math.abs(sample.routeDistance - zone.start),
+        Math.abs(sample.routeDistance - zone.end),
+      );
+      if (distanceToZone <= 26) {
+        nearJunction = true;
+        break;
+      }
     }
-    chunk.event = regionType === "Forest"
-      ? "Woodcutters"
-      : regionType === "Riverside"
-        ? "Fishermen"
-        : regionType === "Farming"
-          ? "Farmers Harvesting"
-          : WORLD_EVENTS[normalizedEventIndex];
-    chunk.fullEventCount = count;
-    finalizeInstances(chunk.eventPeople, count);
+
+    const activityHash = hashUint(this.seed, slot, 1605);
+    let choices = FARMING_ACTIVITIES;
+    if (themeIndex === 8 || themeIndex === 9) {
+      choices = VILLAGE_EDGE_ACTIVITIES;
+    } else if (regionType === "Forest") {
+      choices = FOREST_ACTIVITIES;
+    } else if (regionType === "Riverside") {
+      choices = RIVERSIDE_ACTIVITIES;
+    } else if (regionType === "Dry Plains" || regionType === "Rocky Area") {
+      choices = DRY_ROCKY_ACTIVITIES;
+    } else if (themeIndex === 2) {
+      choices = GRASSLAND_ACTIVITIES;
+    }
+    let activityType = choices[activityHash % choices.length];
+    if (nearJunction) {
+      activityType = AMBIENT_ACTIVITY_TYPES.TEA_STALL;
+    } else if (
+      (chunk.layoutIndex === 1
+        || chunk.layoutIndex === 2
+        || chunk.layoutIndex === 3)
+      && hash01(this.seed, slot, 1606) < 0.32
+    ) {
+      activityType = AMBIENT_ACTIVITY_TYPES.SHRINE;
+    }
+
+    const heading = Math.atan2(sample.tangentX, sample.tangentZ);
+    const lateralDistance = (
+      sample.width * 0.5
+      + SURFACE_SHOULDER_WIDTH
+      + ROADSIDE_SAFETY_MARGIN
+      + randomOffset
+    );
+    const baseX = sample.centerX + sample.normalX * side * lateralDistance;
+    const baseZ = sample.centerZ + sample.normalZ * side * lateralDistance;
+    const peopleBase = chunk.activityPeopleBase;
+    const animalsBase = chunk.activityAnimalsBase;
+    const smokeBase = chunk.activitySmokeBase;
+    let peopleCount = 0;
+    let animalCount = 0;
+    let propCount = 0;
+    let shelterCount = 0;
+    let smokeCount = 0;
+
+    const positionAt = (lateral, forward, target) => {
+      target.x = (
+        baseX
+        + sample.normalX * side * lateral
+        + sample.tangentX * forward
+      );
+      target.z = (
+        baseZ
+        + sample.normalZ * side * lateral
+        + sample.tangentZ * forward
+      );
+    };
+    const writeAnimatedBase = (
+      array,
+      index,
+      x,
+      y,
+      z,
+      rotation,
+      scale,
+      motion,
+    ) => {
+      const offset = index * 7;
+      array[offset] = x;
+      array[offset + 1] = y;
+      array[offset + 2] = z;
+      array[offset + 3] = rotation;
+      array[offset + 4] = scale;
+      array[offset + 5] = motion;
+      array[offset + 6] = hash01(this.seed, slot, 1650 + index) * Math.PI * 2;
+    };
+    const addPerson = (
+      lateral,
+      forward,
+      scale = 1,
+      motion = 0,
+      rotationOffset = 0,
+    ) => {
+      if (peopleCount >= MAX_EVENT_PEOPLE) return;
+      positionAt(lateral, forward, placement);
+      const y = motion === 1 ? 0.4 * scale : 0.625 * scale;
+      const rotation = heading + rotationOffset;
+      writeAnimatedBase(
+        peopleBase,
+        peopleCount,
+        placement.x,
+        y,
+        placement.z,
+        rotation,
+        scale,
+        motion,
+      );
+      setTransform(
+        this.scratch,
+        placement.x,
+        y,
+        placement.z,
+        rotation,
+        scale,
+        motion === 1 ? scale * 0.64 : scale,
+        scale,
+      );
+      chunk.eventPeople.setMatrixAt(peopleCount, this.scratch.matrix);
+      setTransform(
+        this.scratch,
+        placement.x,
+        y + (motion === 1 ? 0.58 : 0.78) * scale,
+        placement.z,
+        rotation,
+        scale,
+        scale,
+        scale,
+      );
+      chunk.activityHeads.setMatrixAt(peopleCount, this.scratch.matrix);
+      peopleCount += 1;
+    };
+    const addAnimal = (lateral, forward, scale = 1, motion = 0) => {
+      if (animalCount >= MAX_ACTIVITY_ANIMALS) return;
+      positionAt(lateral, forward, placement);
+      const rotation = heading + (side > 0 ? -Math.PI * 0.5 : Math.PI * 0.5);
+      const y = 0.34 * scale;
+      writeAnimatedBase(
+        animalsBase,
+        animalCount,
+        placement.x,
+        y,
+        placement.z,
+        rotation,
+        scale,
+        motion,
+      );
+      setTransform(
+        this.scratch,
+        placement.x,
+        y,
+        placement.z,
+        rotation,
+        scale,
+        scale,
+        scale,
+      );
+      chunk.activityAnimals.setMatrixAt(animalCount, this.scratch.matrix);
+      animalCount += 1;
+    };
+    const addProp = (
+      lateral,
+      forward,
+      y,
+      scaleX,
+      scaleY,
+      scaleZ,
+      rotationOffset = 0,
+    ) => {
+      if (propCount >= MAX_ACTIVITY_PROPS) return;
+      positionAt(lateral, forward, placement);
+      setTransform(
+        this.scratch,
+        placement.x,
+        y,
+        placement.z,
+        heading + rotationOffset,
+        scaleX,
+        scaleY,
+        scaleZ,
+      );
+      chunk.activityProps.setMatrixAt(propCount, this.scratch.matrix);
+      propCount += 1;
+    };
+    const addShelter = (
+      lateral,
+      forward,
+      y,
+      scaleX,
+      scaleY,
+      scaleZ,
+    ) => {
+      if (shelterCount >= MAX_ACTIVITY_SHELTERS) return;
+      positionAt(lateral, forward, placement);
+      setTransform(
+        this.scratch,
+        placement.x,
+        y,
+        placement.z,
+        heading,
+        scaleX,
+        scaleY,
+        scaleZ,
+      );
+      chunk.activityShelters.setMatrixAt(shelterCount, this.scratch.matrix);
+      shelterCount += 1;
+    };
+    const addSmoke = (lateral, forward, height) => {
+      if (smokeCount >= MAX_ACTIVITY_SMOKE) return;
+      positionAt(lateral, forward, placement);
+      writeAnimatedBase(
+        smokeBase,
+        smokeCount,
+        placement.x,
+        height,
+        placement.z,
+        0,
+        0.55,
+        0,
+      );
+      setTransform(
+        this.scratch,
+        placement.x,
+        height,
+        placement.z,
+        0,
+        0.55,
+        0.55,
+        0.55,
+      );
+      chunk.activitySmoke.setMatrixAt(smokeCount, this.scratch.matrix);
+      smokeCount += 1;
+    };
+
+    chunk.activityProps.material = materials.trunk;
+    chunk.activityShelters.material = materials.roofStraw;
+    if (activityType === AMBIENT_ACTIVITY_TYPES.FARMER_PLOUGHING) {
+      addPerson(1, -1.6, 1, 3, side * -0.35);
+      addAnimal(2.4, 0.6, 1.05, 1);
+      addProp(1.8, -0.1, 0.14, 0.18, 0.18, 2.7, 0.18);
+    } else if (activityType === AMBIENT_ACTIVITY_TYPES.VILLAGERS_SITTING) {
+      addPerson(1.1, -1.5, 1, 1, 0.4);
+      addPerson(1.2, 0, 0.94, 1, -0.2);
+      addPerson(1, 1.5, 1.02, 1, -0.55);
+      addProp(3.2, 0, 1.6, 0.5, 3.2, 0.5);
+      addShelter(3.2, 0, 4.2, 3.4, 3, 3.4);
+      chunk.activityShelters.material = materials.leaf;
+    } else if (activityType === AMBIENT_ACTIVITY_TYPES.SHEPHERD) {
+      addPerson(0.4, 0, 1, 0, side * -0.45);
+      for (let index = 0; index < 5; index += 1) {
+        addAnimal(
+          2 + (index % 2) * 1.7,
+          -2.4 + Math.floor(index / 2) * 2.1,
+          0.58 + (index % 3) * 0.06,
+          1,
+        );
+      }
+    } else if (activityType === AMBIENT_ACTIVITY_TYPES.WATER_CARRIERS) {
+      for (let index = 0; index < 3; index += 1) {
+        addPerson(0.6 + index * 0.75, -1.8 + index * 1.7, 0.92, 2);
+        addProp(0.6 + index * 0.75, -1.8 + index * 1.7, 1.45, 0.3, 0.28, 0.3);
+      }
+      chunk.activityProps.material = materials.clay;
+    } else if (activityType === AMBIENT_ACTIVITY_TYPES.PARKED_CART) {
+      addPerson(0.4, -2.8, 1, 0, 0.5);
+      addAnimal(1.5, 2.2, 1, 0);
+      addProp(1.3, 0, 0.72, 2.4, 0.42, 1.65);
+      addProp(1.3, -1.25, 0.4, 2.8, 0.14, 0.18);
+      addProp(1.3, 1.25, 0.4, 2.8, 0.14, 0.18);
+    } else if (activityType === AMBIENT_ACTIVITY_TYPES.TEA_STALL) {
+      addPerson(0.6, -1.5, 1, 1, 0.4);
+      addPerson(0.5, 0, 0.96, 0, -0.35);
+      addPerson(0.7, 1.5, 1.02, 1, -0.6);
+      addProp(1.8, 0, 0.75, 2.5, 1.5, 1.4);
+      addProp(0.2, 0, 0.45, 1.6, 0.16, 0.72);
+      addShelter(1.8, 0, 2.3, 3.2, 1.2, 2.4);
+      addSmoke(2, 0.4, 2.2);
+      addSmoke(2, 0.4, 2.9);
+      addSmoke(2, 0.4, 3.6);
+    } else if (activityType === AMBIENT_ACTIVITY_TYPES.CHILDREN_PLAYING) {
+      for (let index = 0; index < 4; index += 1) {
+        addPerson(
+          0.5 + (index % 2) * 1.4,
+          -1.4 + Math.floor(index / 2) * 2.8,
+          0.68,
+          4,
+          index * 0.7,
+        );
+      }
+      addProp(1.2, 0, 0.2, 0.35, 0.35, 0.35);
+      chunk.activityProps.material = materials.bright;
+    } else if (activityType === AMBIENT_ACTIVITY_TYPES.CATTLE_GRAZING) {
+      for (let index = 0; index < 6; index += 1) {
+        addAnimal(
+          0.8 + (index % 3) * 1.8,
+          -2 + Math.floor(index / 3) * 3.6,
+          0.85 + (index % 2) * 0.12,
+          1,
+        );
+      }
+    } else if (activityType === AMBIENT_ACTIVITY_TYPES.WOODCUTTING) {
+      addPerson(0.4, -1.2, 1, 3, -0.5);
+      addPerson(0.5, 1.2, 0.96, 3, 0.35);
+      for (let index = 0; index < 4; index += 1) {
+        addProp(
+          2 + (index % 2) * 0.65,
+          -1 + Math.floor(index / 2) * 1.2,
+          0.18 + (index % 2) * 0.12,
+          0.32,
+          0.32,
+          2.1,
+          Math.PI * 0.5 + index * 0.12,
+        );
+      }
+    } else if (activityType === AMBIENT_ACTIVITY_TYPES.SHRINE) {
+      addPerson(0.2, -1.6, 0.94, 0, 0.4);
+      addProp(1.8, 0, 0.42, 1.7, 0.85, 1.55);
+      addProp(1.8, 0, 1.35, 0.75, 1, 0.7);
+      addShelter(1.8, 0, 2.35, 1.7, 2.2, 1.7);
+      chunk.activityProps.material = materials.plaster;
+      chunk.activityShelters.material = materials.bright;
+    } else if (activityType === AMBIENT_ACTIVITY_TYPES.FISHERMEN) {
+      addPerson(0.4, -1.5, 1, 1, 0.3);
+      addPerson(0.5, 1, 0.96, 1, -0.4);
+      addProp(1.2, -1.1, 0.12, 0.12, 0.12, 3.2, 0.25);
+      addProp(1.3, 1.4, 0.35, 0.8, 0.7, 0.8);
+    } else {
+      for (let index = 0; index < 3; index += 1) {
+        addPerson(0.5 + index * 0.7, -1.7 + index * 1.7, 0.92, 3);
+        addProp(1.7 + index * 0.45, -1.7 + index * 1.7, 0.12, 0.9, 0.12, 0.75);
+      }
+      chunk.activityProps.material = materials.plasterBlue;
+    }
+
+    chunk.event = activityType;
+    chunk.activityType = activityType;
+    chunk.activityRouteDistance = sample.routeDistance;
+    chunk.fullEventCount = peopleCount;
+    chunk.fullActivityAnimalCount = animalCount;
+    chunk.fullActivityPropCount = propCount;
+    chunk.fullActivityShelterCount = shelterCount;
+    chunk.fullActivitySmokeCount = smokeCount;
+    finalizeInstances(chunk.eventPeople, peopleCount);
+    finalizeInstances(chunk.activityHeads, peopleCount);
+    finalizeInstances(chunk.activityAnimals, animalCount);
+    finalizeInstances(chunk.activityProps, propCount);
+    finalizeInstances(chunk.activityShelters, shelterCount);
+    finalizeInstances(chunk.activitySmoke, smokeCount);
+  }
+
+  animateActivity(chunk, elapsed) {
+    if (
+      !chunk.group.visible
+      || chunk.lodLevel >= 2
+      || chunk.activityType === "None"
+    ) return;
+
+    const peopleCount = chunk.eventPeople.count;
+    const peopleBase = chunk.activityPeopleBase;
+    for (let index = 0; index < peopleCount; index += 1) {
+      const offset = index * 7;
+      const baseX = peopleBase[offset];
+      const baseY = peopleBase[offset + 1];
+      const baseZ = peopleBase[offset + 2];
+      const baseRotation = peopleBase[offset + 3];
+      const scale = peopleBase[offset + 4];
+      const motion = peopleBase[offset + 5];
+      const phase = peopleBase[offset + 6];
+      const cycle = elapsed * (motion === 4 ? 1.5 : 0.75) + phase;
+      let x = baseX;
+      let y = baseY;
+      let z = baseZ;
+      let rotation = baseRotation + Math.sin(cycle * 0.55) * 0.16;
+      let scaleY = motion === 1 ? scale * 0.64 : scale;
+      if (motion === 2) {
+        const travel = Math.sin(cycle * 0.45) * 0.7;
+        x += Math.sin(baseRotation) * travel;
+        z += Math.cos(baseRotation) * travel;
+        y += Math.abs(Math.sin(cycle * 2)) * 0.025;
+      } else if (motion === 3) {
+        rotation += Math.sin(cycle * 1.8) * 0.22;
+        scaleY *= 0.96 + Math.sin(cycle * 1.8) * 0.035;
+      } else if (motion === 4) {
+        x += Math.sin(cycle) * 0.35;
+        z += Math.cos(cycle) * 0.35;
+        y += Math.abs(Math.sin(cycle * 2)) * 0.035;
+        rotation = cycle + Math.PI * 0.5;
+      }
+      setTransform(
+        this.scratch,
+        x,
+        y,
+        z,
+        rotation,
+        scale,
+        scaleY,
+        scale,
+      );
+      chunk.eventPeople.setMatrixAt(index, this.scratch.matrix);
+      setTransform(
+        this.scratch,
+        x,
+        y + (motion === 1 ? 0.58 : 0.78) * scale,
+        z,
+        rotation,
+        scale,
+        scale,
+        scale,
+      );
+      chunk.activityHeads.setMatrixAt(index, this.scratch.matrix);
+    }
+    if (peopleCount > 0) {
+      chunk.eventPeople.instanceMatrix.needsUpdate = true;
+      chunk.activityHeads.instanceMatrix.needsUpdate = true;
+    }
+
+    const animalCount = chunk.activityAnimals.count;
+    const animalsBase = chunk.activityAnimalsBase;
+    for (let index = 0; index < animalCount; index += 1) {
+      const offset = index * 7;
+      const baseX = animalsBase[offset];
+      const baseY = animalsBase[offset + 1];
+      const baseZ = animalsBase[offset + 2];
+      const rotation = animalsBase[offset + 3];
+      const scale = animalsBase[offset + 4];
+      const motion = animalsBase[offset + 5];
+      const phase = animalsBase[offset + 6];
+      const cycle = elapsed * 0.42 + phase;
+      const travel = motion > 0 ? Math.sin(cycle) * 0.42 : 0;
+      const graze = motion > 0 ? 0.9 + Math.sin(cycle * 1.4) * 0.08 : 1;
+      setTransform(
+        this.scratch,
+        baseX + Math.sin(rotation) * travel,
+        baseY,
+        baseZ + Math.cos(rotation) * travel,
+        rotation + Math.sin(cycle * 0.6) * 0.12,
+        scale,
+        scale * graze,
+        scale,
+      );
+      chunk.activityAnimals.setMatrixAt(index, this.scratch.matrix);
+    }
+    if (animalCount > 0) {
+      chunk.activityAnimals.instanceMatrix.needsUpdate = true;
+    }
+
+    const smokeCount = chunk.activitySmoke.count;
+    const smokeBase = chunk.activitySmokeBase;
+    for (let index = 0; index < smokeCount; index += 1) {
+      const offset = index * 7;
+      const phase = smokeBase[offset + 6];
+      const rise = (elapsed * 0.22 + phase / (Math.PI * 2)) % 1;
+      const scale = smokeBase[offset + 4] * (0.62 + rise * 0.8);
+      setTransform(
+        this.scratch,
+        smokeBase[offset] + Math.sin(elapsed * 0.35 + phase) * 0.22,
+        smokeBase[offset + 1] + rise * 1.55,
+        smokeBase[offset + 2] + Math.cos(elapsed * 0.28 + phase) * 0.14,
+        0,
+        scale,
+        scale,
+        scale,
+      );
+      chunk.activitySmoke.setMatrixAt(index, this.scratch.matrix);
+    }
+    if (smokeCount > 0) chunk.activitySmoke.instanceMatrix.needsUpdate = true;
   }
 
   configure(chunk, chunkIndex, difficulty, region) {
@@ -2008,7 +3279,7 @@ export class EnvironmentGenerator {
       obstacle.z = 10000;
       obstacle.radius = 0;
     }
-    this.fillGround(chunk, chunkIndex);
+    this.fillGround(chunk, chunkIndex, difficulty);
     this.configureTrees(
       chunk,
       chunkIndex,
@@ -2016,7 +3287,14 @@ export class EnvironmentGenerator {
       theme,
       regionDefinition,
     );
-    this.configureCrops(chunk, chunkIndex, themeIndex, theme, regionDefinition);
+    this.configureCrops(
+      chunk,
+      chunkIndex,
+      difficulty,
+      themeIndex,
+      theme,
+      regionDefinition,
+    );
     this.configureRoadside(
       chunk,
       chunkIndex,
@@ -2025,16 +3303,25 @@ export class EnvironmentGenerator {
       regionDefinition,
     );
     this.configureWater(chunk, chunkIndex, themeIndex, region.type);
-    this.configureWorldEvent(chunk, chunkIndex, difficulty, region.type);
+    this.configureWorldEvent(
+      chunk,
+      chunkIndex,
+      difficulty,
+      region.type,
+      themeIndex,
+    );
     chunk.themeIndex = themeIndex;
     chunk.theme = theme.name;
   }
 }
 
 export class VillageGenerator {
-  constructor(seed) {
+  constructor(seed, roadGenerator) {
     this.seed = seed;
+    this.roadGenerator = roadGenerator;
     this.scratch = new THREE.Object3D();
+    this.roadWorldPosition = { x: 0, z: 0 };
+    this.roadSample = {};
   }
 
   configureVillageDetails(chunk, chunkIndex, houseCount, regionType) {
@@ -2157,7 +3444,7 @@ export class VillageGenerator {
     return used;
   }
 
-  configure(chunk, chunkIndex, region) {
+  configure(chunk, chunkIndex, difficulty, region) {
     const isVillage =
       chunk.themeIndex === 8
       || chunk.themeIndex === 9
@@ -2165,6 +3452,7 @@ export class VillageGenerator {
     if (!isVillage) {
       chunk.village = "None";
       chunk.fullHouseCount = 0;
+      chunk.fullVillageDetailCount = 0;
       finalizeInstances(chunk.houses, 0);
       finalizeInstances(chunk.roofs, 0);
       hideMeshPool(chunk.villageMeshPool);
@@ -2178,16 +3466,36 @@ export class VillageGenerator {
     for (let index = 0; index < houseCount; index += 1) {
       const side = index % 2 ? 1 : -1;
       const rank = Math.floor(index / 2);
-      const x = side * (20 + (rank % 2) * 7 + hash01(this.seed, chunkIndex, 1740 + index) * 3);
       const z = startZ + 7 + rank * 10 + hash01(this.seed, chunkIndex, 1780 + index) * 2;
+      this.roadWorldPosition.z = z;
+      const roadSample = this.roadGenerator.sampleRoad(
+        this.roadWorldPosition,
+        difficulty,
+        this.roadSample,
+      );
+      const x = roadSample.centerX + side * (
+        roadSample.width * 0.5
+        + 8.5
+        + (rank % 2) * 6
+        + hash01(this.seed, chunkIndex, 1740 + index) * 3
+      );
       const rotation = side > 0 ? -Math.PI / 2 : Math.PI / 2;
       const scale = 0.82 + hash01(this.seed, chunkIndex, 1820 + index) * 0.32;
-      setTransform(this.scratch, x, 1.5 * scale, z, rotation, scale, scale, scale);
+      setTransform(
+        this.scratch,
+        x,
+        roadSample.height + 1.5 * scale,
+        z,
+        rotation,
+        scale,
+        scale,
+        scale,
+      );
       chunk.houses.setMatrixAt(index, this.scratch.matrix);
       setTransform(
         this.scratch,
         x,
-        3.85 * scale,
+        roadSample.height + 3.85 * scale,
         z,
         rotation + Math.PI / 4,
         scale,
@@ -2203,7 +3511,12 @@ export class VillageGenerator {
     chunk.fullHouseCount = houseCount;
     finalizeInstances(chunk.houses, houseCount);
     finalizeInstances(chunk.roofs, houseCount);
-    this.configureVillageDetails(chunk, chunkIndex, houseCount, region.type);
+    chunk.fullVillageDetailCount = this.configureVillageDetails(
+      chunk,
+      chunkIndex,
+      houseCount,
+      region.type,
+    );
     chunk.village =
       `${VILLAGE_NAMES[hashUint(this.seed, chunkIndex, 1862) % VILLAGE_NAMES.length]} · ${
         region.type
@@ -2403,6 +3716,7 @@ export class ChunkManager {
     this.villageGenerator.configure(
       chunk,
       chunkIndex,
+      difficulty,
       this.regionDescriptor,
     );
     this.landmarkManager.configure(
@@ -2421,8 +3735,12 @@ export class ChunkManager {
       + chunk.fullPotCount
       + chunk.fullWoodPileCount
       + chunk.fullSignCount
-      + chunk.fullEventCount
-      + (chunk.village === "None" ? 0 : 6)
+      + chunk.fullEventCount * 2
+      + chunk.fullActivityAnimalCount
+      + chunk.fullActivityPropCount
+      + chunk.fullActivityShelterCount
+      + chunk.fullActivitySmokeCount
+      + chunk.fullVillageDetailCount
       + (chunk.landmark === "None" ? 0 : 5)
       + 3;
   }
@@ -2465,17 +3783,47 @@ export class ChunkManager {
       chunk.grass.count = Math.ceil(chunk.fullGrassCount / (divisor * 1.35));
       chunk.bushes.count = Math.ceil(chunk.fullBushCount / divisor);
       chunk.rocks.count = Math.ceil(chunk.fullRockCount / divisor);
-      chunk.houses.count = Math.ceil(chunk.fullHouseCount / divisor);
-      chunk.roofs.count = Math.ceil(chunk.fullHouseCount / divisor);
+      chunk.houses.count = level === 2
+        ? 0
+        : Math.ceil(chunk.fullHouseCount / divisor);
+      chunk.roofs.count = level === 2
+        ? Math.min(2, chunk.fullHouseCount)
+        : level === 1
+          ? Math.ceil(chunk.fullHouseCount * 0.72)
+          : chunk.fullHouseCount;
+      const visibleVillageDetails = level === 0
+        ? chunk.fullVillageDetailCount
+        : level === 1
+          ? Math.ceil(chunk.fullVillageDetailCount * 0.55)
+          : Math.min(1, chunk.fullVillageDetailCount);
+      for (let detailIndex = 0; detailIndex < chunk.villageMeshPool.length; detailIndex += 1) {
+        chunk.villageMeshPool[detailIndex].visible = (
+          chunk.village !== "None"
+          && detailIndex < visibleVillageDetails
+        );
+      }
       chunk.roadsideProps.count = Math.ceil(chunk.fullPropCount / divisor);
       chunk.pots.count = Math.ceil(chunk.fullPotCount / divisor);
       chunk.woodPiles.count = Math.ceil(chunk.fullWoodPileCount / divisor);
       chunk.signs.count = Math.ceil(chunk.fullSignCount / divisor);
       chunk.eventPeople.count = level === 2 ? 0 : Math.ceil(chunk.fullEventCount / divisor);
+      chunk.activityHeads.count = chunk.eventPeople.count;
+      chunk.activityAnimals.count = level === 2
+        ? 0
+        : Math.ceil(chunk.fullActivityAnimalCount / divisor);
+      chunk.activityProps.count = level === 2
+        ? 0
+        : Math.ceil(chunk.fullActivityPropCount / divisor);
+      chunk.activityShelters.count = level === 2
+        ? 0
+        : Math.ceil(chunk.fullActivityShelterCount / divisor);
+      chunk.activitySmoke.count = level === 0
+        ? chunk.fullActivitySmokeCount
+        : 0;
     }
   }
 
-  update(playerPosition, difficulty) {
+  update(playerPosition, difficulty, elapsed = 0) {
     const currentIndex = Math.floor(playerPosition.z / CHUNK_LENGTH);
     const difficultyChanged = difficulty !== this.currentDifficulty;
     if (currentIndex !== this.currentChunkIndex || difficultyChanged) {
@@ -2491,6 +3839,9 @@ export class ChunkManager {
       this.ensureRange(currentIndex, difficulty);
     }
     this.applyLOD(currentIndex);
+    for (let index = 0; index < this.chunks.length; index += 1) {
+      this.environmentGenerator.animateActivity(this.chunks[index], elapsed);
+    }
   }
 
   getCurrentChunk() {
@@ -2515,8 +3866,15 @@ export class WorldGenerator {
     this.seed = generatedSeed;
     this.obstacles = new Array(poolSize * OBSTACLES_PER_CHUNK);
     this.roadGenerator = new RoadGenerator(generatedSeed);
-    this.environmentGenerator = new EnvironmentGenerator(generatedSeed, this.obstacles);
-    this.villageGenerator = new VillageGenerator(generatedSeed);
+    this.environmentGenerator = new EnvironmentGenerator(
+      generatedSeed,
+      this.obstacles,
+      this.roadGenerator,
+    );
+    this.villageGenerator = new VillageGenerator(
+      generatedSeed,
+      this.roadGenerator,
+    );
     this.landmarkManager = new LandmarkManager(generatedSeed);
     this.chunkManager = new ChunkManager({
       scene,
@@ -2535,6 +3893,7 @@ export class WorldGenerator {
     this.villageRegion = {};
     this.regionTint = new THREE.Color(0xa4cde3);
     this.previousPlayerZ = Number.NaN;
+    this.ambientElapsed = 0;
     this.fps = 60;
     this.drawCalls = 0;
     this.debug = {
@@ -2570,6 +3929,34 @@ export class WorldGenerator {
       difficulty,
       target,
     );
+  }
+
+  checkWaterAhead(position, heading, lookAhead, target) {
+    const forwardX = Math.sin(heading);
+    const forwardZ = Math.cos(heading);
+    for (let index = 0; index < this.chunkManager.chunks.length; index += 1) {
+      const chunk = this.chunkManager.chunks[index];
+      const water = chunk.water;
+      if (!chunk.group.visible || !water.visible) continue;
+      const halfWidth = water.scale.x * 0.5 + 1.4;
+      const halfDepth = water.scale.y * 0.5 + 1.4;
+      for (let distance = 3; distance <= lookAhead; distance += 3) {
+        const x = position.x + forwardX * distance;
+        const z = position.z + forwardZ * distance;
+        if (
+          Math.abs(x - water.position.x) <= halfWidth
+          && Math.abs(z - water.position.z) <= halfDepth
+        ) {
+          target.obstacleAhead = true;
+          target.blocked = true;
+          target.smallObstacle = false;
+          target.distance = Math.min(target.distance, distance);
+          target.reason = "DEEP_WATER";
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   getRegionAtRouteDistance(routeDistance, target = {}) {
@@ -2640,6 +4027,15 @@ export class WorldGenerator {
     );
   }
 
+  configureJunctionRoads(junctions, count, difficulty = 1) {
+    this.roadGenerator.setJunctionTrackZones(junctions, count);
+    for (let index = 0; index < this.chunkManager.chunks.length; index += 1) {
+      const chunk = this.chunkManager.chunks[index];
+      if (!chunk.group.visible || !Number.isFinite(chunk.chunkIndex)) continue;
+      this.chunkManager.configureChunk(chunk, chunk.chunkIndex, difficulty);
+    }
+  }
+
   generateVillage(
     routeDistance,
     difficulty,
@@ -2696,7 +4092,12 @@ export class WorldGenerator {
       this.reseed();
     }
     this.previousPlayerZ = playerPosition.z;
-    this.chunkManager.update(playerPosition, difficulty);
+    this.ambientElapsed += delta;
+    this.chunkManager.update(
+      playerPosition,
+      difficulty,
+      this.ambientElapsed,
+    );
     this.roadGenerator.getRoutePosition(
       playerPosition,
       difficulty,
@@ -2712,9 +4113,6 @@ export class WorldGenerator {
     const tintBlend = 1 - Math.exp(-0.35 * delta);
     if (this.scene.background && this.scene.background.isColor) {
       this.scene.background.lerp(this.regionTint, tintBlend);
-    }
-    if (this.scene.fog) {
-      this.scene.fog.color.lerp(this.regionTint, tintBlend);
     }
     this.fps = THREE.MathUtils.lerp(
       this.fps,

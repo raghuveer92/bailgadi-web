@@ -72,20 +72,21 @@ const JUNCTION_DIRECTION_THRESHOLD_DEGREES = 20;
 const VEHICLE_HALF_WIDTH = 2.25;
 const ROAD_FOOTPRINT_SAFETY_MARGIN = 0.2;
 const ROAD_SAFE_ZONE_RATIO = 0.68;
-const ROAD_HEADING_DEAD_ZONE = THREE.MathUtils.degToRad(6);
+const ROAD_HEADING_DEAD_ZONE = THREE.MathUtils.degToRad(2.5);
 const ROAD_EDGE_CORRECTION_ANGLE = THREE.MathUtils.degToRad(10);
 const ROAD_OUTSIDE_CORRECTION_ANGLE = THREE.MathUtils.degToRad(22);
 const ROAD_LOOKAHEAD_SLOW = 10;
 const ROAD_LOOKAHEAD_FAST = 24;
 const ROAD_TANGENT_NOISE_THRESHOLD = THREE.MathUtils.degToRad(1.25);
 const ROAD_TANGENT_SMOOTHING = 1.35;
-const ROAD_CURVE_MAX_CORRECTION_ANGLE = THREE.MathUtils.degToRad(12);
-const ROAD_AUTO_CORRECTION_RATE = THREE.MathUtils.degToRad(7);
-const ROAD_EDGE_CORRECTION_RATE = THREE.MathUtils.degToRad(10);
-const ROAD_OUTSIDE_CORRECTION_RATE = THREE.MathUtils.degToRad(15);
-const ROAD_CORRECTION_RESPONSE = 1.4;
+const ROAD_CURVE_MAX_CORRECTION_ANGLE = THREE.MathUtils.degToRad(24);
+const ROAD_AUTO_CORRECTION_RATE_SLOW = THREE.MathUtils.degToRad(12);
+const ROAD_AUTO_CORRECTION_RATE_FAST = THREE.MathUtils.degToRad(24);
+const ROAD_EDGE_CORRECTION_RATE = THREE.MathUtils.degToRad(24);
+const ROAD_OUTSIDE_CORRECTION_RATE = THREE.MathUtils.degToRad(34);
+const ROAD_CORRECTION_RESPONSE = 3.2;
 const ROAD_CORRECTION_REVERSE_DELAY = 0.55;
-const PLAYER_GUIDANCE_DURATION = 2.25;
+const PLAYER_ROUTE_CHOICE_DURATION = 2.25;
 const BLOCKED_LOOKAHEAD_MIN = 7;
 const BLOCKED_LOOKAHEAD_MAX = 15;
 const ROUTE_END_STOP_MARGIN = 9;
@@ -1251,6 +1252,40 @@ function updateRoadSamples() {
     currentRoadSample.routeDistance - sampleDistance
   );
   applyNavigationRouteSample(behindRoadSample, behindRoadPosition.x);
+}
+
+function constrainCartToRoad(delta) {
+  const safeHalfWidth = Math.max(
+    0,
+    currentRoadSample.width * 0.5
+      - VEHICLE_HALF_WIDTH
+      - ROAD_FOOTPRINT_SAFETY_MARGIN,
+  );
+  const lateralOffset = (
+    (cart.position.x - currentRoadSample.centerX) * currentRoadSample.normalX
+    + (cart.position.z - currentRoadSample.centerZ) * currentRoadSample.normalZ
+  );
+  const constrainedOffset = THREE.MathUtils.clamp(
+    lateralOffset,
+    -safeHalfWidth,
+    safeHalfWidth,
+  );
+  const correction = constrainedOffset - lateralOffset;
+  if (Math.abs(correction) <= 0.0001) {
+    state.lateralOffset = lateralOffset;
+    return false;
+  }
+
+  // Steering assistance should normally keep the cart inside this corridor.
+  // This projection is the final safety net for frame spikes, maximum-speed
+  // cornering, and sustained steering toward the shoulder.
+  cart.position.x += currentRoadSample.normalX * correction;
+  cart.position.z += currentRoadSample.normalZ * correction;
+  state.lateralOffset = constrainedOffset;
+  state.heading = dampAngle(state.heading, state.roadHeading, 9, delta);
+  state.steeringVelocity = damp(state.steeringVelocity, 0, 10, delta);
+  cart.rotation.y = state.heading;
+  return true;
 }
 
 function updateTerrainPose(delta, snap = false) {
@@ -2432,28 +2467,33 @@ function updateMovement(delta) {
     (controls.state.left ? 1 : 0)
     - (controls.state.right ? 1 : 0);
   bullGuidanceState.playerSteeringInput = steerInput;
-  if (steerInput !== 0 && steerInput !== state.previousSteerInput) {
-    clearPlayerGuidance(bullGuidanceState);
+  if (steerInput !== 0) {
+    const steeringDirection = steerInput > 0
+      ? DRIVER_DIRECTIONS.LEFT
+      : DRIVER_DIRECTIONS.RIGHT;
+    if (steeringDirection !== bullGuidanceState.playerGuidanceDirection) {
+      clearPlayerGuidance(bullGuidanceState);
+    }
     bullGuidanceState.playerGuidanceDirection = steerInput > 0
       ? DRIVER_DIRECTIONS.LEFT
       : DRIVER_DIRECTIONS.RIGHT;
-    bullGuidanceState.playerGuidanceRemainingTime = PLAYER_GUIDANCE_DURATION;
+    bullGuidanceState.playerGuidanceRemainingTime = PLAYER_ROUTE_CHOICE_DURATION;
     bullGuidanceState.playerGuidanceActive = true;
     bullGuidanceState.lastDriverDirection = bullGuidanceState.playerGuidanceDirection;
     bullGuidanceState.driverDirection = bullGuidanceState.playerGuidanceDirection;
     bullGuidanceState.driverInputAge = 0;
   }
   state.previousSteerInput = steerInput;
-  bullGuidanceState.latchedSteeringInput = bullGuidanceState.playerGuidanceActive
-    ? bullGuidanceState.playerGuidanceDirection === DRIVER_DIRECTIONS.LEFT ? 1 : -1
-    : 0;
+  bullGuidanceState.latchedSteeringInput = steerInput;
   updateCurrentRoadSample();
   updateStableRoadHeading(delta);
   if (bullGuidanceState.playerGuidanceActive) {
-    bullGuidanceState.playerGuidanceRemainingTime = Math.max(
-      0,
-      bullGuidanceState.playerGuidanceRemainingTime - delta,
-    );
+    if (steerInput === 0) {
+      bullGuidanceState.playerGuidanceRemainingTime = Math.max(
+        0,
+        bullGuidanceState.playerGuidanceRemainingTime - delta,
+      );
+    }
     bullGuidanceState.driverInputAge += delta;
     if (
       bullGuidanceState.playerGuidanceTargetRouteId === "None"
@@ -2463,12 +2503,9 @@ function updateMovement(delta) {
     }
     if (bullGuidanceState.playerGuidanceRemainingTime === 0) {
       clearPlayerGuidance(bullGuidanceState);
-      bullGuidanceState.latchedSteeringInput = 0;
     }
   }
-  const guidanceTarget = bullGuidanceState.playerGuidanceActive
-    ? bullGuidanceState.playerGuidanceDirection === DRIVER_DIRECTIONS.LEFT ? 1 : -1
-    : 0;
+  const guidanceTarget = steerInput;
   bullGuidanceState.guidanceAmount = damp(
     bullGuidanceState.guidanceAmount,
     guidanceTarget,
@@ -2607,7 +2644,7 @@ function updateMovement(delta) {
   bullGuidanceState.roadContainmentForce = containmentForce;
   state.lateralRecenteringForce = containmentForce;
   const speedSteeringFactor = THREE.MathUtils.lerp(1, 0.48, speedRatio);
-  let driverHeadingOffset = bullGuidanceState.guidanceAmount
+  let driverHeadingOffset = steerInput
     * 0.28
     * speedSteeringFactor;
   if (
@@ -2636,7 +2673,7 @@ function updateMovement(delta) {
   const junctionDecisionActive = navigationState.candidateRouteId !== "None"
     && !navigationState.branchCommitted
     && navigationState.distanceFromJunction >= -ROUTE_CHOICE_DISTANCE;
-  const playerGuidanceActive = Math.abs(bullGuidanceState.guidanceAmount) > 0.015;
+  const playerGuidanceActive = steerInput !== 0;
   const routeCorrectionActive = edgeRoad || outsideRoad;
   const inwardAngle = routeCorrectionActive
     ? -Math.sign(state.lateralOffset) * (outsideRoad
@@ -2673,10 +2710,15 @@ function updateMovement(delta) {
     : curveCorrectionTarget !== 0 ? 0.25 : 0;
   // Curve following and containment are deliberately independent. As edge
   // authority rises, curve authority is reduced so both cannot peak together.
+  const automaticCurveRate = THREE.MathUtils.lerp(
+    ROAD_AUTO_CORRECTION_RATE_SLOW,
+    ROAD_AUTO_CORRECTION_RATE_FAST,
+    speedRatio,
+  );
   const curveSteeringVelocity = THREE.MathUtils.clamp(
     curveCorrectionTarget * 0.65,
-    -ROAD_AUTO_CORRECTION_RATE,
-    ROAD_AUTO_CORRECTION_RATE,
+    -automaticCurveRate,
+    automaticCurveRate,
   );
   const containmentRate = outsideRoad
     ? ROAD_OUTSIDE_CORRECTION_RATE
@@ -2695,7 +2737,7 @@ function updateMovement(delta) {
   );
   const automaticRateLimit = outsideRoad
     ? ROAD_OUTSIDE_CORRECTION_RATE
-    : edgeRoad ? ROAD_EDGE_CORRECTION_RATE : ROAD_AUTO_CORRECTION_RATE;
+    : edgeRoad ? ROAD_EDGE_CORRECTION_RATE : automaticCurveRate;
   automaticSteeringVelocity = THREE.MathUtils.clamp(
     automaticSteeringVelocity,
     -automaticRateLimit,
@@ -2816,6 +2858,7 @@ function updateMovement(delta) {
     delta,
   );
   updateRoadSamples();
+  if (constrainCartToRoad(delta)) updateRoadSamples();
   state.lateralOffset = (
     (cart.position.x - currentRoadSample.centerX) * currentRoadSample.normalX
     + (cart.position.z - currentRoadSample.centerZ) * currentRoadSample.normalZ

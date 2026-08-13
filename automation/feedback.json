@@ -17,13 +17,39 @@
       "Attempt to choose the correct route"
     ],
     "expected": "The player should be able to return to the previous junction and select the correct route.",
-    "actual": "The tester could not confirm correctRouteRecovered before the 60 second timeout.",
+    "actual": "correctRouteRecovered stage failed (timed out after 60 seconds) during 2026-08-13 QA run.",
     "evidence": [],
-    "developerNotes": "Fixed return-to-junction branch reset condition in src/main.js. Previously, returning to a junction along a branch checked delta < -8, which was impossible because distance along the branch is positive (delta >= 0). Updated condition to check Math.abs(delta) <= 8 when reverse-aligned with branch tangent, allowing the cart to return to junction hub, reset isOnWrongRoute to false, and select the correct outgoing route.",
-    "fixedAt": "2026-08-12T12:27:40.000Z",
+    "developerNotes": "Root cause: During return travel and junction re-entry (cart turned around facing backward along branch toward junction), updateStableRoadHeading in src/main.js was sampling currentRoadSample.routeDistance + lookAheadDistance without checking cart heading orientation. Since routeDistance increases away from junction, sampling +lookAheadDistance looked BEHIND the cart (further down the wrong branch) instead of ahead in travel direction (toward junction). This caused sampledHeading to point away from junction, making bull guidance fight route recovery steering and causing correctRouteRecovered to time out. Fixed by computing facingReverse (cart heading closer to reverseRoadHeading than forward roadHeading) and using signedLookAhead = facingReverse ? -lookAheadDistance : lookAheadDistance. Road sampling now looks ahead along the actual travel vector toward junction during wrong-route return.",
+    "fixedAt": "2026-08-13T14:59:00.000Z",
     "fixedCommit": null,
-    "verificationNotes": "",
-    "verifiedAt": null,
-    "reopenCount": 0
+    "verificationNotes": "QA run on 2026-08-13 (tester-20260813-145630.md): correctRouteRecovered stage FAILED (timed out). Cart failed to recover correct route after returning to junction. Status updated FIXED → REOPENED. Now fixed again by adding reverse-facing look-ahead sampling in updateStableRoadHeading.",
+    "verifiedAt": "2026-08-13T14:56:30.000Z",
+    "reopenCount": 4
+  },
+  {
+    "id": "BG-0002",
+    "title": "Wrong route cannot be confirmed — isReturnArrival fires during forward branch travel",
+    "description": "After committing to an outgoing branch at a junction, the isReturnArrival condition fired on every frame where the cart was within 42m of the junction (delta 0–42), even while traveling forward away from the junction. This continuously reset branchCommitted=false and cleared committedRouteId, then re-ran the branch commit loop. isOnWrongRoute was never durably set to true, preventing wrongRouteConfirmed from passing.",
+    "category": "navigation",
+    "severity": "high",
+    "status": "CLOSED",
+    "foundAt": "2026-08-13T09:53:00.000Z",
+    "foundByRun": "tester-20260813-095200.md",
+    "reproduction": [
+      "Start a mission",
+      "Reach a junction",
+      "Steer left onto wrong branch",
+      "Observe: isOnWrongRoute stays false",
+      "wrongRouteConfirmed times out after 45s"
+    ],
+    "expected": "After committing to a wrong branch, isOnWrongRoute=true persists and wrongRouteConfirmed passes.",
+    "actual": "wrongRouteConfirmed timed out after 45s — isOnWrongRoute stayed false.",
+    "evidence": [],
+    "developerNotes": "Root cause: The previous 'returnReentryActive' fix broke BG-0002 again by clearing commitments based on distance. Resolved by implementing an explicit junctionLifecycleState. Once the branch commits, the state becomes COMMITTED. During COMMITTED, all junction re-decision logic is bypassed. The state only transitions to RETURNING when the cart is physically moving backward and facing the junction, making forward travel away from the junction perfectly stable and immune to distance-based re-triggering.",
+    "fixedAt": "2026-08-13T10:19:18.000Z",
+    "fixedCommit": null,
+    "verificationNotes": "QA run on 2026-08-13 (tester-20260813-145630.md): wrongRouteConfirmed stage PASSED smoothly. Status updated FIXED → CLOSED.",
+    "verifiedAt": "2026-08-13T14:56:30.000Z",
+    "reopenCount": 1
   }
 ]

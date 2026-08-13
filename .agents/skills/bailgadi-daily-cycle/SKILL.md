@@ -8,10 +8,11 @@ description: Master orchestrator skill for Bailgadi Web Game. Sequentially runs 
 This skill orchestrates the daily continuous autonomous QA workflow for **Bailgadi Web Game**:
 
 ```text
-Tester Agent → Check Results → Check Work → Developer Agent (if needed) → Verification
+Tester Agent (Read-Only QA) → Check Results → Check Work → Developer Agent (Code Fixes) → Verification
 ```
 
-> **CRITICAL RULE**: Tester and Developer must NEVER run simultaneously. Tester always runs first to completion. Developer runs only after Tester completes successfully and only if OPEN or REOPENED issues exist.
+> **CRITICAL RULE**: Tester and Developer must NEVER run simultaneously. Tester always runs first to completion. Developer runs only after Tester completes successfully (`PASS` or `PARTIAL`) and only if `OPEN` or `REOPENED` issues exist.
+> **STRICT BOUNDARY SAFEGUARD**: Tester is strictly READ-ONLY for production game code (`src/**`). Tester MUST NOT edit production code, run `npm run build`, or repair game defects. If Tester modifies protected source files, the daily cycle fails (`FAIL`) and stops immediately.
 
 ---
 
@@ -19,11 +20,13 @@ Tester Agent → Check Results → Check Work → Developer Agent (if needed) �
 
 ### STEP 1 — TESTER AGENT EXECUTION
 1. Invoke the `bailgadi-tester` skill.
-2. The Tester agent executes `node automation/tester/play-game.js`:
+2. The Tester agent executes `node automation/tester/play-game.js` in read-only mode:
+   * Snapshots `runnerHashBefore` and protected source file states.
    * Verifies previous `FIXED` issues (`FIXED → CLOSED` or `FIXED → REOPENED`).
-   * Executes stage-gated real gameplay testing.
+   * Executes stage-gated real gameplay testing (max 1 attempt if gameplay starts; at most 1 retry if infrastructure startup fails before `missionStarted`).
+   * Verifies `runnerHashAfter` and confirms no protected source files were modified.
    * Logs or updates `OPEN` / `REOPENED` issues in `automation/feedback.json` for gameplay defects.
-   * Updates `automation/tester-state.json`.
+   * Updates `automation/tester-state.json` with process accounting (`runnerAttemptCount`, `gameplayStartedOnAttempt`, `infrastructureRetryUsed`, `retryReason`, `runnerHashBefore`, `runnerHashAfter`, `runnerModifiedDuringRun`, `protectedSourceModified`).
    * Saves tester report to `automation/runs/tester/<timestamp>.md`.
 
 ---
@@ -31,14 +34,14 @@ Tester Agent → Check Results → Check Work → Developer Agent (if needed) �
 ### STEP 2 — CHECK TESTER RESULT & CLASSIFICATION
 Before proceeding, evaluate the Tester result classification:
 
-* **If Tester Result is `FAIL` (Infrastructure Blocker)**:
-  * Testing infrastructure was unreliable (`testInfrastructureBlocker === true`).
+* **If Tester Result is `FAIL` (Infrastructure Blocker, Runner Modified, or Protected Source Modified)**:
+  * Testing infrastructure was unreliable (`testInfrastructureBlocker === true`), `runnerModifiedDuringRun === true`, or `protectedSourceModified === true`.
   * **STOP THE PIPELINE IMMEDIATELY**.
-  * Do **NOT** start the Developer agent on unreliable output.
+  * Do **NOT** start the Developer agent on unreliable or contaminated output.
   * Record the failure reason in `automation/runs/tester/pipeline-failure-<timestamp>.md`.
 
 * **If Tester Result is `PASS` or `PARTIAL`**:
-  * Infrastructure was reliable (`testInfrastructureBlocker === false`).
+  * Infrastructure was reliable (`testInfrastructureBlocker === false`, `runnerModifiedDuringRun === false`, `protectedSourceModified === false`).
   * If `PARTIAL`, gameplay defects were observed and recorded as `OPEN` / `REOPENED` issues in `automation/feedback.json`.
   * Proceed to Step 3.
 

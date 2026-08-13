@@ -589,6 +589,13 @@ const navigationState = {
   selectedOutgoingRouteId: "None",
   candidateRouteId: "None",
   branchCommitted: false,
+  // Explicit junction lifecycle: NONE | DECIDING | COMMITTED | RETURNING
+  // NONE       — no active junction
+  // DECIDING   — at junction, selecting branch (first arrival OR return re-entry)
+  // COMMITTED  — branch chosen, forward travel; NO junction logic runs here
+  // RETURNING  — reversed on committed branch, heading back toward same junction
+  junctionLifecycleState: "NONE",
+  activeLifecycleJunctionId: "None",
   branchSeparationDistance: 0,
   distanceFromJunction: Number.POSITIVE_INFINITY,
   branchCommitProgress: 0,
@@ -921,6 +928,12 @@ function updateNavigationRouteChoice(physicalRouteDistance) {
   let nearbyJunctionIndex = -1;
   let candidateRouteId = "None";
 
+  // Determine direction of travel for junction disambiguation.
+  // lastPhysicalRouteDistance holds the previous frame's value (updated in updateJourneyProgress
+  // after this function runs). movingBackward = true means physicalRouteDistance is decreasing.
+  const frameMotion = physicalRouteDistance - navigationState.lastPhysicalRouteDistance;
+  const movingBackward = frameMotion < -0.001; // cart is physically reversing
+
   for (let index = 0; index < missionRouteNetwork.junctionCount; index += 1) {
     const junction = junctionDescriptors[index];
     const delta = physicalRouteDistance - junction.routeDistance;
@@ -930,14 +943,103 @@ function updateNavigationRouteChoice(physicalRouteDistance) {
     ) {
       navigationState.nextJunctionRouteDistance = junction.routeDistance;
     }
-    if (
-      navigationState.currentRouteId === junction.incomingRouteId
-      && delta >= -JUNCTION_APPROACH_DISTANCE
-      && delta <= BRANCH_COMMIT_MAX_DISTANCE + 8
-    ) {
-      if (navigationState.selectedJunctionId !== junction.id) {
-        navigationState.branchCommitted = false;
+
+    // Check if the cart is currently travelling on one of this junction's outgoing branches.
+    const isCurrentBranch = (
+      routeDirectionForId(junction, navigationState.currentRouteId) !== "NONE"
+    );
+
+    // Heading alignment checks relative to the current branch tangent.
+    let reverseAligned = false;
+    if (isCurrentBranch) {
+      const currentBranch = routeSegmentForId(navigationState.currentRouteId);
+      if (currentBranch) {
+        sampleBranchCandidate(currentBranch, physicalRouteDistance);
+        const reverseBranchHeading = Math.atan2(
+          -candidateBranchSample.tangentX,
+          -candidateBranchSample.tangentZ,
+        );
+        reverseAligned = Math.abs(
+          wrappedAngleDelta(state.heading, reverseBranchHeading),
+        ) <= THREE.MathUtils.degToRad(60);
       }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // LIFECYCLE TRANSITIONS
+    // States: NONE | DECIDING | COMMITTED | RETURNING
+    //
+    //  NONE      — no active junction selected
+    //  DECIDING  — at junction zone, choosing outgoing branch
+    //              (first arrival OR return re-entry after wrong route)
+    //  COMMITTED — branch chosen; forward travel; NO junction logic runs
+    //  RETURNING — cart reversed on committed branch, heading back to junction
+    // ─────────────────────────────────────────────────────────────────────────
+    const lc = navigationState.junctionLifecycleState;
+    const lcIsThisJunction = navigationState.activeLifecycleJunctionId === junction.id;
+
+    // ── NONE or different junction → DECIDING (first approach) ───────────────
+    if (lc === "NONE" || !lcIsThisJunction) {
+      if (
+        navigationState.currentRouteId === junction.incomingRouteId
+        && delta >= -JUNCTION_APPROACH_DISTANCE
+        && delta <= BRANCH_COMMIT_MAX_DISTANCE + 8
+      ) {
+        // Cart is approaching this junction on its incoming route for the first time.
+        navigationState.junctionLifecycleState = "DECIDING";
+        navigationState.activeLifecycleJunctionId = junction.id;
+        if (navigationState.selectedJunctionId !== junction.id) {
+          navigationState.branchCommitted = false;
+        }
+      }
+    }
+
+    // Skip all junction logic unless this is the active lifecycle junction.
+    if (navigationState.activeLifecycleJunctionId !== junction.id) {
+      if (Math.abs(delta) <= 58) nearbyJunctionIndex = index;
+      continue;
+    }
+
+    // ── COMMITTED → RETURNING ────────────────────────────────────────────────
+    // Transition to RETURNING ONLY when:
+    //   • cart is on the committed outgoing branch (isCurrentBranch)
+    //   • cart heading points back toward junction (reverseAligned)
+    //   • cart is physically moving backward (movingBackward from frameMotion)
+    // This triple requirement ensures forward travel immediately after commit —
+    // even within 42m of the junction — NEVER triggers RETURNING. This is the
+    // core invariant that solves BG-0002.
+    if (
+      lc === "COMMITTED"
+      && isCurrentBranch
+      && reverseAligned
+      && movingBackward
+    ) {
+      navigationState.junctionLifecycleState = "RETURNING";
+    }
+
+    // ── RETURNING → DECIDING (re-entry one-time clear) ───────────────────────
+    // When the cart returns to within the junction approach zone while heading backward,
+    // clear the old branch commitment ONCE and enter fresh decision mode.
+    // isOnWrongRoute is NOT cleared here — wrongRouteConfirmed must already be PASS.
+    if (
+      lc === "RETURNING"
+      && isCurrentBranch
+      && reverseAligned
+      && delta <= JUNCTION_APPROACH_DISTANCE + 8
+      && delta >= -(JUNCTION_APPROACH_DISTANCE + 8)
+    ) {
+      navigationState.branchCommitted = false;
+      navigationState.junctionLifecycleState = "DECIDING";
+      bullGuidanceState.committedRouteId = "None";
+      if (bullGuidanceState.driverInputAge > 10) {
+        clearPlayerGuidance(bullGuidanceState);
+      }
+    }
+
+    // ── DECIDING: run candidate selection + commit logic ─────────────────────
+    // This runs for BOTH first arrival (NONE→DECIDING) and return re-entry (RETURNING→DECIDING).
+    // COMMITTED phase is explicitly excluded — no junction logic runs while forward-travelling.
+    if (navigationState.junctionLifecycleState === "DECIDING") {
       const naturalRouteId = naturalBranchRouteId(junction, physicalRouteDistance);
       bullGuidanceState.naturalBranchChoice = naturalRouteId;
       const rememberedDirection = bullGuidanceState.playerGuidanceActive
@@ -947,6 +1049,8 @@ function updateNavigationRouteChoice(physicalRouteDistance) {
         ? routeIdForDirection(junction, rememberedDirection)
         : "None";
       candidateRouteId = directedRouteId !== "None" ? directedRouteId : naturalRouteId;
+
+      // Measure lateral distance to every outgoing branch to find the best physical match.
       let bestRouteId = "None";
       let bestLateralDistance = Number.POSITIVE_INFINITY;
       let secondLateralDistance = Number.POSITIVE_INFINITY;
@@ -975,7 +1079,18 @@ function updateNavigationRouteChoice(physicalRouteDistance) {
           secondLateralDistance = lateralDistance;
         }
       }
-      if (delta >= BRANCH_COMMIT_DISTANCE && bestRouteId !== "None") {
+
+      // Commit trigger:
+      // First arrival: cart must reach BRANCH_COMMIT_DISTANCE past junction centre.
+      // Return re-entry (previouslyOnWrongRoute): allow commit from any position within
+      // the junction zone as long as heading + lateral position match (cart has turned
+      // and is entering an outgoing branch corridor).
+      const isFirstApproach = navigationState.currentRouteId === junction.incomingRouteId;
+      const commitTrigger = isFirstApproach
+        ? delta >= BRANCH_COMMIT_DISTANCE
+        : Math.abs(delta) <= BRANCH_COMMIT_MAX_DISTANCE + 12;
+
+      if (commitTrigger && bestRouteId !== "None") {
         const captureWidth = Math.max(0.25, bestWidth * 0.5);
         const footprintMostlyInside = (
           bestLateralDistance
@@ -1001,6 +1116,7 @@ function updateNavigationRouteChoice(physicalRouteDistance) {
             chosenRouteId !== junction.correctOutgoingRouteId
           );
           navigationState.branchCommitted = true;
+          navigationState.junctionLifecycleState = "COMMITTED";
           bullGuidanceState.committedRouteId = chosenRouteId;
           clearPlayerGuidance(bullGuidanceState);
           setBullGuidanceState(
@@ -1008,33 +1124,6 @@ function updateNavigationRouteChoice(physicalRouteDistance) {
             BULL_GUIDANCE_STATES.COMMITTED_TO_BRANCH,
           );
         }
-      }
-      nearbyJunctionIndex = index;
-    } else if (
-      routeDirectionForId(junction, navigationState.currentRouteId) !== "NONE"
-    ) {
-      navigationState.correctRouteId = junction.correctOutgoingRouteId;
-      const currentBranch = routeSegmentForId(navigationState.currentRouteId);
-      let reverseAligned = false;
-      if (currentBranch) {
-        sampleBranchCandidate(currentBranch, physicalRouteDistance);
-        const reverseBranchHeading = Math.atan2(
-          -candidateBranchSample.tangentX,
-          -candidateBranchSample.tangentZ,
-        );
-        reverseAligned = Math.abs(
-          wrappedAngleDelta(state.heading, reverseBranchHeading),
-        ) <= THREE.MathUtils.degToRad(45);
-      }
-      if (Math.abs(delta) <= 8 && reverseAligned) {
-        navigationState.currentRouteId = junction.incomingRouteId;
-        navigationState.correctRouteId = junction.incomingRouteId;
-        navigationState.selectedJunctionId = "None";
-        navigationState.currentJunctionIndex = -1;
-        navigationState.branchDirection = "STRAIGHT";
-        navigationState.isOnWrongRoute = false;
-        navigationState.branchCommitted = false;
-        navigationState.candidateRouteId = "None";
       }
     }
 
@@ -1138,8 +1227,10 @@ function applyNavigationRouteSample(sample, worldX) {
     for (let index = 0; index < missionRouteNetwork.junctionCount; index += 1) {
       const junction = junctionDescriptors[index];
       const delta = sample.routeDistance - junction.routeDistance;
+      const isIncoming = navigationState.currentRouteId === junction.incomingRouteId;
+      const isOutgoingBranch = routeDirectionForId(junction, navigationState.currentRouteId) !== "NONE";
       if (
-        navigationState.currentRouteId === junction.incomingRouteId
+        (isIncoming || isOutgoingBranch)
         && delta >= -ROUTE_CHOICE_DISTANCE
         && delta < BRANCH_COMMIT_MAX_DISTANCE
       ) {
@@ -1195,8 +1286,16 @@ function updateStableRoadHeading(delta, snap = false) {
     ROAD_LOOKAHEAD_FAST,
     speedRatio,
   );
+  const reverseRoadHeading = Math.atan2(
+    Math.sin(state.roadHeading + Math.PI),
+    Math.cos(state.roadHeading + Math.PI),
+  );
+  const facingReverse = Math.abs(wrappedAngleDelta(state.heading, reverseRoadHeading))
+    < Math.abs(wrappedAngleDelta(state.heading, state.roadHeading));
+  const signedLookAhead = facingReverse ? -lookAheadDistance : lookAheadDistance;
+
   sampleBaseRouteDistance(
-    currentRoadSample.routeDistance + lookAheadDistance,
+    currentRoadSample.routeDistance + signedLookAhead,
     state.mission.level,
     guidanceRoadSample,
   );
@@ -1686,6 +1785,8 @@ function resetNavigationState() {
   navigationState.selectedOutgoingRouteId = "None";
   navigationState.candidateRouteId = "None";
   navigationState.branchCommitted = false;
+  navigationState.junctionLifecycleState = "NONE";
+  navigationState.activeLifecycleJunctionId = "None";
   navigationState.branchSeparationDistance = 0;
   navigationState.distanceFromJunction = Number.POSITIVE_INFINITY;
   navigationState.branchCommitProgress = 0;

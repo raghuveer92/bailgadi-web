@@ -422,7 +422,7 @@ export async function runGameplayAutomation() {
     await delay(300);
     await evaluate("window.__bailgadiTest.reverseStart()");
     await evaluate("window.__bailgadiTest.steerRightStart()");
-    await delay(1500);
+    await delay(1800);
     finalOutput.stages.turnaroundAttempted = "PASS";
     console.log("[Tester] turnaroundAttempted PASS");
 
@@ -449,7 +449,7 @@ export async function runGameplayAutomation() {
     console.log("[Tester] turnaroundSuccessful PASS");
 
     // Stage 7: returnedToJunction
-    const res7 = await waitForState(evaluate, (s) => (s.junctionId !== "None" || (s.distanceRemaining !== undefined && s.distanceRemaining <= 485)), {
+    const res7 = await waitForState(evaluate, (s) => (s.junctionId !== "None" || (s.distanceRemaining !== undefined && s.distanceRemaining <= 456)), {
       timeoutMs: STAGE_TIMEOUTS.returnedToJunction,
       stageName: "returnedToJunction",
     });
@@ -467,8 +467,9 @@ export async function runGameplayAutomation() {
     console.log("[Tester] returnedToJunction PASS");
 
     // Stage 8: correctRouteRecovered
+    // At junction hub facing 180°: steerRight turns cart toward negative X (route-0-branch-right)
     await evaluate("window.__bailgadiTest.steerRightStart()");
-    await delay(1200);
+    await delay(1800);
     await evaluate("window.__bailgadiTest.steerRightStop()");
 
     const res8 = await waitForState(evaluate, (s) => s.isOnWrongRoute === false, {

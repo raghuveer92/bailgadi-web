@@ -1,8 +1,17 @@
 {
-  "lastRun": "2026-08-12T09:43:00.000Z",
-  "lastRunId": "tester-20260812-094300",
+  "lastRunId": "tester-20260813-145630",
+  "lastRunTimestamp": "2026-08-13T14:56:30.000Z",
   "lastResult": "PARTIAL",
-  "totalRuns": 1,
-  "verifiedCount": 0,
-  "reopenedCount": 0
+  "testInfrastructureBlocker": false,
+  "infrastructureBlockerReason": null,
+  "failedStage": "correctRouteRecovered",
+  "runnerAttemptCount": 2,
+  "gameplayStartedOnAttempt": true,
+  "infrastructureRetryUsed": true,
+  "retryReason": "Attempt 1 timed out before missionStarted during sandbox process launch",
+  "runnerHashBefore": "f51dff24b9cbce9f654e72ce2d8f1bad74ed4df019933b3504f8a0d7e87b9cb3",
+  "runnerHashAfter": "f51dff24b9cbce9f654e72ce2d8f1bad74ed4df019933b3504f8a0d7e87b9cb3",
+  "runnerModifiedDuringRun": false,
+  "protectedSourceModified": false,
+  "lastReportPath": "automation/runs/tester/tester-20260813-145630.md"
 }

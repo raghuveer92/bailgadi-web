@@ -1427,6 +1427,8 @@ export class RoadGenerator {
   }
 
   setJunctionTrackZones(junctions, count) {
+    this.junctions = junctions;
+    this.junctionCount = count;
     this.junctionTrackZones.length = count;
     for (let index = 0; index < count; index += 1) {
       const descriptor = junctions[index];
@@ -1454,6 +1456,24 @@ export class RoadGenerator {
         && routeDistance <= zone.end + padding
       ) {
         return true;
+      }
+    }
+    return false;
+  }
+
+  isInsideTurnaroundZone(routeDistance) {
+    if (!this.junctions) return false;
+    for (let index = 0; index < this.junctionCount; index += 1) {
+      const junction = this.junctions[index];
+      for (let rIdx = 0; rIdx < junction.outgoingRoutes.length; rIdx += 1) {
+        const route = junction.outgoingRoutes[rIdx];
+        if (route.id !== junction.correctOutgoingRouteId) {
+          const start = route.endRouteDistance - (route.turnaroundLength || 28);
+          const end = route.endRouteDistance;
+          if (routeDistance >= start && routeDistance <= end) {
+            return true;
+          }
+        }
       }
     }
     return false;
@@ -1853,6 +1873,7 @@ export class RoadGenerator {
         checkpointClear
         && routeDistance < finalRouteDistance
         && !this.isInsideJunctionZone(routeDistance, 4)
+        && !this.isInsideTurnaroundZone(routeDistance)
       ) {
         const descriptor = targetHazards[hazardCount];
         const sample = this.sampleRouteDistance(
@@ -2407,6 +2428,9 @@ export class EnvironmentGenerator {
         return false;
       }
     }
+    if (this.roadGenerator.isInsideTurnaroundZone(sample.routeDistance)) {
+      return false;
+    }
     target.x = (
       sample.centerX
       + side * (
@@ -2732,6 +2756,10 @@ export class EnvironmentGenerator {
   }
 
   configureWater(chunk, chunkIndex, themeIndex, regionType) {
+    if (this.roadGenerator.isInsideTurnaroundZone(chunkIndex * CHUNK_LENGTH + CHUNK_LENGTH * 0.5)) {
+      chunk.water.visible = false;
+      return;
+    }
     const isPond = themeIndex === 6;
     const isCanal = themeIndex === 7;
     const isRiverside = regionType === "Riverside";
@@ -3328,6 +3356,9 @@ export class VillageGenerator {
     hideMeshPool(chunk.villageMeshPool);
     if (houseCount <= 0) return 0;
     const baseZ = chunkIndex * CHUNK_LENGTH;
+    if (this.roadGenerator.isInsideTurnaroundZone(baseZ + CHUNK_LENGTH * 0.5)) {
+      return 0;
+    }
     let used = 0;
     const combinations = hashUint(this.seed, chunkIndex, 1700);
     const addFeature = (geometry, material, x, y, z, sx, sy, sz, rotation = 0) => {
@@ -3449,7 +3480,8 @@ export class VillageGenerator {
       chunk.themeIndex === 8
       || chunk.themeIndex === 9
       || hash01(this.seed, chunkIndex, 1710) > 0.89;
-    if (!isVillage) {
+    const startZ = chunkIndex * CHUNK_LENGTH;
+    if (!isVillage || this.roadGenerator.isInsideTurnaroundZone(startZ + CHUNK_LENGTH * 0.5)) {
       chunk.village = "None";
       chunk.fullHouseCount = 0;
       chunk.fullVillageDetailCount = 0;
@@ -3462,7 +3494,6 @@ export class VillageGenerator {
       chunk.themeIndex === 9
         ? 10 + (hashUint(this.seed, chunkIndex, 1711) % 5)
         : 5 + (hashUint(this.seed, chunkIndex, 1712) % 5);
-    const startZ = chunkIndex * CHUNK_LENGTH;
     for (let index = 0; index < houseCount; index += 1) {
       const side = index % 2 ? 1 : -1;
       const rank = Math.floor(index / 2);

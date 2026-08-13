@@ -62,6 +62,12 @@ export function createBullGuidanceState(routeId = "None") {
     turnaroundProgress: 0,
     turnaroundAreaId: "None",
     insideTurnaroundArea: false,
+    recoveryActive: false,
+    recoveryRouteId: "None",
+    recoveryDirection: "None",
+    recoveryStartHeading: 0,
+    recoveryTargetHeading: 0,
+    recoveryProgress: 0,
     reverseSteeringAmount: 0,
     safeRoadHalfWidth: 0,
     vehicleHalfWidth: 0,
@@ -121,6 +127,12 @@ export function resetBullGuidanceState(guidance, routeId, commitDistance = 20) {
   guidance.turnaroundProgress = 0;
   guidance.turnaroundAreaId = "None";
   guidance.insideTurnaroundArea = false;
+  guidance.recoveryActive = false;
+  guidance.recoveryRouteId = "None";
+  guidance.recoveryDirection = "None";
+  guidance.recoveryStartHeading = 0;
+  guidance.recoveryTargetHeading = 0;
+  guidance.recoveryProgress = 0;
   guidance.reverseSteeringAmount = 0;
   guidance.safeRoadHalfWidth = 0;
   guidance.blockerDistance = Number.POSITIVE_INFINITY;

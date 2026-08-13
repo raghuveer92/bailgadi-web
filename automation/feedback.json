@@ -1,0 +1,29 @@
+[
+  {
+    "id": "BG-0001",
+    "title": "Unable to recover correct route after returning to junction",
+    "description": "Tester successfully chose a wrong route, turned around, and returned toward the previous junction, but could not recover onto the correct mission route within the 60 second stage timeout.",
+    "category": "navigation",
+    "severity": "high",
+    "status": "FIXED",
+    "foundAt": "2026-08-12T12:20:00.000Z",
+    "foundByRun": "tester-20260812-094300.md",
+    "reproduction": [
+      "Start a mission",
+      "Reach a junction",
+      "Choose a wrong route",
+      "Turn the Bailgadi around",
+      "Return to the previous junction",
+      "Attempt to choose the correct route"
+    ],
+    "expected": "The player should be able to return to the previous junction and select the correct route.",
+    "actual": "The tester could not confirm correctRouteRecovered before the 60 second timeout.",
+    "evidence": [],
+    "developerNotes": "Fixed return-to-junction branch reset condition in src/main.js. Previously, returning to a junction along a branch checked delta < -8, which was impossible because distance along the branch is positive (delta >= 0). Updated condition to check Math.abs(delta) <= 8 when reverse-aligned with branch tangent, allowing the cart to return to junction hub, reset isOnWrongRoute to false, and select the correct outgoing route.",
+    "fixedAt": "2026-08-12T12:27:40.000Z",
+    "fixedCommit": null,
+    "verificationNotes": "",
+    "verifiedAt": null,
+    "reopenCount": 0
+  }
+]
